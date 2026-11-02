@@ -1,0 +1,909 @@
+<!DOCTYPE html><html lang="zh-CN" data-theme="light"><head><meta charset="UTF-8"><meta http-equiv="X-UA-Compatible" content="IE=edge"><meta name="viewport" content="width=device-width, initial-scale=1.0,viewport-fit=cover"><title>大模型为什么会胡说八道：幻觉、知识截止与 RAG | CHENHUI的博客</title><meta name="author" content="CHENHUI"><meta name="copyright" content="CHENHUI"><meta name="format-detection" content="telephone=no"><meta name="theme-color" content="#ffffff"><meta name="description" content="模型一本正经地编造论文、法条和数字，不是因为它&quot;坏&quot;，而是因为它的训练目标里没有&quot;真&quot;这个字。从幻觉的两种类型讲起，用纯 Python 手撕一个迷你 RAG，讲清检索、分块、评估与兜底。">
+<meta property="og:type" content="article">
+<meta property="og:title" content="大模型为什么会胡说八道：幻觉、知识截止与 RAG">
+<meta property="og:url" content="https://chenhui05.github.io/2026/11/02/llm-hallucination-rag/index.html">
+<meta property="og:site_name" content="CHENHUI的博客">
+<meta property="og:description" content="模型一本正经地编造论文、法条和数字，不是因为它&quot;坏&quot;，而是因为它的训练目标里没有&quot;真&quot;这个字。从幻觉的两种类型讲起，用纯 Python 手撕一个迷你 RAG，讲清检索、分块、评估与兜底。">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:image" content="https://chenhui05.github.io/img/avatar.jpg">
+<meta property="article:published_time" content="2026-11-02T13:00:00.000Z">
+<meta property="article:modified_time" content="2026-11-02T14:17:18.012Z">
+<meta property="article:author" content="CHENHUI">
+<meta property="article:tag" content="RAG">
+<meta property="article:tag" content="大模型">
+<meta property="article:tag" content="大模型基础">
+<meta property="article:tag" content="幻觉">
+<meta property="article:tag" content="检索增强">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="https://chenhui05.github.io/img/avatar.jpg"><script type="application/ld+json">{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "大模型为什么会胡说八道：幻觉、知识截止与 RAG",
+  "url": "https://chenhui05.github.io/2026/11/02/llm-hallucination-rag/",
+  "image": "https://chenhui05.github.io/img/avatar.jpg",
+  "datePublished": "2026-11-02T13:00:00.000Z",
+  "dateModified": "2026-11-02T14:17:18.012Z",
+  "author": [
+    {
+      "@type": "Person",
+      "name": "CHENHUI",
+      "url": "https://chenhui05.github.io"
+    }
+  ]
+}</script><link rel="shortcut icon" href="/img/favicon.png"><link rel="canonical" href="https://chenhui05.github.io/2026/11/02/llm-hallucination-rag/index.html"><link rel="preconnect" href="//cdn.jsdelivr.net"/><link rel="preconnect" href="//busuanzi.ibruce.info"/><link rel="stylesheet" href="/css/index.css?v=5.5.4"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@7.1.0/css/all.min.css"><script>
+    (() => {
+      
+    const saveToLocal = {
+      set: (key, value, ttl) => {
+        if (!ttl) return
+        const expiry = Date.now() + ttl * 86400000
+        localStorage.setItem(key, JSON.stringify({ value, expiry }))
+      },
+      get: key => {
+        const itemStr = localStorage.getItem(key)
+        if (!itemStr) return undefined
+        const { value, expiry } = JSON.parse(itemStr)
+        if (Date.now() > expiry) {
+          localStorage.removeItem(key)
+          return undefined
+        }
+        return value
+      }
+    }
+
+    window.btf = {
+      saveToLocal,
+      getScript: (url, attr = {}) => new Promise((resolve, reject) => {
+        const script = document.createElement('script')
+        script.src = url
+        script.async = true
+        Object.entries(attr).forEach(([key, val]) => script.setAttribute(key, val))
+        script.onload = script.onreadystatechange = () => {
+          if (!script.readyState || /loaded|complete/.test(script.readyState)) resolve()
+        }
+        script.onerror = reject
+        document.head.appendChild(script)
+      }),
+      getCSS: (url, id) => new Promise((resolve, reject) => {
+        const link = document.createElement('link')
+        link.rel = 'stylesheet'
+        link.href = url
+        if (id) link.id = id
+        link.onload = link.onreadystatechange = () => {
+          if (!link.readyState || /loaded|complete/.test(link.readyState)) resolve()
+        }
+        link.onerror = reject
+        document.head.appendChild(link)
+      }),
+      addGlobalFn: (key, fn, name = false, parent = window) => {
+        if (!false && key.startsWith('pjax')) return
+        const globalFn = parent.globalFn || {}
+        globalFn[key] = globalFn[key] || {}
+        globalFn[key][name || Object.keys(globalFn[key]).length] = fn
+        parent.globalFn = globalFn
+      }
+    }
+  
+      
+      const activateDarkMode = () => {
+        document.documentElement.setAttribute('data-theme', 'dark')
+        if (document.querySelector('meta[name="theme-color"]') !== null) {
+          document.querySelector('meta[name="theme-color"]').setAttribute('content', '#0d0d0d')
+        }
+      }
+      const activateLightMode = () => {
+        document.documentElement.setAttribute('data-theme', 'light')
+        if (document.querySelector('meta[name="theme-color"]') !== null) {
+          document.querySelector('meta[name="theme-color"]').setAttribute('content', '#ffffff')
+        }
+      }
+
+      btf.activateDarkMode = activateDarkMode
+      btf.activateLightMode = activateLightMode
+
+      const theme = saveToLocal.get('theme')
+    
+          theme === 'dark' ? activateDarkMode() : theme === 'light' ? activateLightMode() : null
+        
+      
+      const asideStatus = saveToLocal.get('aside-status')
+      if (asideStatus !== undefined) {
+        document.documentElement.classList.toggle('hide-aside', asideStatus === 'hide')
+      }
+    
+      
+    const detectApple = () => {
+      if (/iPad|iPhone|iPod|Macintosh/.test(navigator.userAgent)) {
+        document.documentElement.classList.add('apple')
+      }
+    }
+    detectApple()
+  
+    })()
+  </script><script>const GLOBAL_CONFIG = {
+  root: '/',
+  algolia: undefined,
+  localSearch: undefined,
+  translate: undefined,
+  highlight: {"plugin":"highlight.js","highlightCopy":true,"highlightLang":true,"highlightHeightLimit":false,"highlightFullpage":false,"highlightMacStyle":false},
+  copy: {
+    success: '复制成功',
+    error: '复制失败',
+    noSupport: '浏览器不支持'
+  },
+  relativeDate: {
+    homepage: false,
+    post: false
+  },
+  runtime: '',
+  dateSuffix: {
+    just: '刚刚',
+    min: '分钟前',
+    hour: '小时前',
+    day: '天前',
+    month: '个月前'
+  },
+  copyright: undefined,
+  lightbox: 'null',
+  Snackbar: undefined,
+  infinitegrid: {
+    js: 'https://cdn.jsdelivr.net/npm/@egjs/infinitegrid@4.13.0/dist/infinitegrid.min.js',
+    buttonText: '加载更多'
+  },
+  isPhotoFigcaption: false,
+  islazyloadPlugin: false,
+  isAnchor: false,
+  percent: {
+    toc: true,
+    rightside: false,
+  },
+  autoDarkmode: false
+}</script><script id="config-diff">var GLOBAL_CONFIG_SITE = {
+  title: '大模型为什么会胡说八道：幻觉、知识截止与 RAG',
+  isHighlightShrink: false,
+  isToc: true,
+  pageType: 'post'
+}</script><meta name="generator" content="Hexo 8.1.2"></head><body><div id="sidebar"><div id="menu-mask"></div><div id="sidebar-menus"><div class="avatar-img text-center"><img src="/img/avatar.jpg" onerror="this.onerror=null;this.src='/img/friend_404.gif'" alt="avatar"/></div><div class="site-data text-center"><a href="/archives/"><div class="headline">文章</div><div class="length-num">9</div></a><a href="/tags/"><div class="headline">标签</div><div class="length-num">27</div></a><a href="/categories/"><div class="headline">分类</div><div class="length-num">1</div></a></div><div class="menus_items"><div class="menus_item"><a class="site-page" href="/"><i class="fa-fw fas fa-home"></i><span> 首页</span></a></div><div class="menus_item"><a class="site-page" href="/archives/"><i class="fa-fw fas fa-archive"></i><span> 归档</span></a></div><div class="menus_item"><a class="site-page" href="/tags/"><i class="fa-fw fas fa-tags"></i><span> 标签</span></a></div><div class="menus_item"><a class="site-page" href="/categories/"><i class="fa-fw fas fa-folder-open"></i><span> 分类</span></a></div><div class="menus_item"><a class="site-page" href="/about/"><i class="fa-fw fas fa-heart"></i><span> 关于</span></a></div></div></div></div><div class="post" id="body-wrap"><header class="post-bg" id="page-header"><nav id="nav"><span id="blog-info"><a class="nav-site-title" href="/"><span class="site-name">CHENHUI的博客</span></a><a class="nav-page-title" href="/"><span class="site-name">大模型为什么会胡说八道：幻觉、知识截止与 RAG</span><span class="site-name"><i class="fa-solid fa-circle-arrow-left"></i><span>  返回首页</span></span></a></span><div id="menus"><div class="menus_items"><div class="menus_item"><a class="site-page" href="/"><i class="fa-fw fas fa-home"></i><span> 首页</span></a></div><div class="menus_item"><a class="site-page" href="/archives/"><i class="fa-fw fas fa-archive"></i><span> 归档</span></a></div><div class="menus_item"><a class="site-page" href="/tags/"><i class="fa-fw fas fa-tags"></i><span> 标签</span></a></div><div class="menus_item"><a class="site-page" href="/categories/"><i class="fa-fw fas fa-folder-open"></i><span> 分类</span></a></div><div class="menus_item"><a class="site-page" href="/about/"><i class="fa-fw fas fa-heart"></i><span> 关于</span></a></div></div><div id="toggle-menu"><span class="site-page"><i class="fas fa-bars fa-fw"></i></span></div></div></nav><div id="post-info"><h1 class="post-title">大模型为什么会胡说八道：幻觉、知识截止与 RAG</h1><div id="post-meta"><div class="meta-firstline"><span class="post-meta-date"><i class="far fa-calendar-alt fa-fw post-meta-icon"></i><span class="post-meta-label">发表于</span><time class="post-meta-date-created" datetime="2026-11-02T13:00:00.000Z" title="发表于 2026-11-02 21:00:00">2026-11-02</time><span class="post-meta-separator">|</span><i class="fas fa-history fa-fw post-meta-icon"></i><span class="post-meta-label">更新于</span><time class="post-meta-date-updated" datetime="2026-11-02T14:17:18.012Z" title="更新于 2026-11-02 22:17:18">2026-11-02</time></span><span class="post-meta-categories"><span class="post-meta-separator">|</span><i class="fas fa-inbox fa-fw post-meta-icon"></i><a class="post-meta-categories" href="/categories/%E4%BA%BA%E5%B7%A5%E6%99%BA%E8%83%BD/">人工智能</a></span></div><div class="meta-secondline"><span class="post-meta-separator">|</span><span class="post-meta-pv-cv" id="" data-flag-title=""><i class="far fa-eye fa-fw post-meta-icon"></i><span class="post-meta-label">浏览量:</span><span id="busuanzi_value_page_pv"><i class="fa-solid fa-spinner fa-spin"></i></span></span></div></div></div></header><main class="layout" id="content-inner"><div id="post"><article class="container post-content" id="article-container"><h2 id="写在前面"><a href="#写在前面" class="headerlink" title="写在前面"></a>写在前面</h2><p>我见过最离谱的一次：让某模型推荐几篇”关于大模型幻觉”的论文，它一口气给了五篇，标题、作者、年份、期刊全都像模像样——<strong>但没有一篇真实存在</strong>。</p>
+<p>更麻烦的是，它说得很自信。没有”可能””大概”，没有犹豫，甚至连引用格式都给你排好了。你如果不去查，根本发现不了。</p>
+<p>这就是<strong>幻觉（Hallucination）</strong>：模型生成了流畅、自信、但<strong>不符合事实</strong>或<strong>没有依据</strong>的内容。</p>
+<p>很多人把它当成”模型还不够强”的 bug，等下一代就好了。但这一篇想告诉你：</p>
+<blockquote>
+<p>幻觉不是偶然的故障，而是”预测下一个 token”这个训练目标的<strong>结构性副产品</strong>。它不会消失，只能被管理。</p>
+</blockquote>
+<p>我们会讲清楚：</p>
+<ul>
+<li>幻觉分哪两种，各自怎么产生；</li>
+<li>为什么模型”不知道自己不知道”；</li>
+<li>RAG 到底怎么接，为什么它不能包治百病；</li>
+<li>用 100 行纯 Python 手撕一个迷你检索系统，跑通”检索—增强—生成”的骨架；</li>
+<li>怎么评估一个 RAG 系统到底靠不靠谱。</li>
+</ul>
+<p>这是「大模型基础」系列的第六篇，也是最后一篇。前面讲了模型怎么读字、怎么生成、怎么训练、记忆为什么贵；这一篇讲它最常被诟病的毛病，以及工程上的应对。</p>
+<span id="more"></span>
+
+<h2 id="一、幻觉的两种类型"><a href="#一、幻觉的两种类型" class="headerlink" title="一、幻觉的两种类型"></a>一、幻觉的两种类型</h2><p>学术界通常把幻觉分成两类，这个分类很实用，因为<strong>解法完全不同</strong>。</p>
+<h3 id="1-1-事实性幻觉（Factuality-Hallucination）"><a href="#1-1-事实性幻觉（Factuality-Hallucination）" class="headerlink" title="1.1 事实性幻觉（Factuality Hallucination）"></a>1.1 事实性幻觉（Factuality Hallucination）</h3><p>模型说了一个与客观事实不符的内容：</p>
+<ul>
+<li>编造不存在的论文、法条、书籍、人物；</li>
+<li>把 2023 年的事件说成 2021 年；</li>
+<li>把某个 API 的参数名记错；</li>
+<li>给出一个看似合理但错误的数字。</li>
+</ul>
+<p>这类幻觉的根源是<strong>知识问题</strong>：模型没记住，或者记错了，或者训练数据本身有错。</p>
+<h3 id="1-2-忠实性幻觉（Faithfulness-Hallucination）"><a href="#1-2-忠实性幻觉（Faithfulness-Hallucination）" class="headerlink" title="1.2 忠实性幻觉（Faithfulness Hallucination）"></a>1.2 忠实性幻觉（Faithfulness Hallucination）</h3><p>模型说的话可能本身没错，但<strong>和你给它的资料&#x2F;上下文不一致</strong>：</p>
+<ul>
+<li>你给它一份文档，它总结时加入了文档里没有的内容；</li>
+<li>你让它”只根据以下资料回答”，它却用了自己的先验知识；</li>
+<li>多轮对话里前后矛盾；</li>
+<li>引用来源标错，答案对但出处不对。</li>
+</ul>
+<p>这类幻觉的根源是<strong>遵循问题</strong>：模型没有忠实地使用上下文，或者注意力被带偏了。</p>
+<table>
+<thead>
+<tr>
+<th>类型</th>
+<th>表现</th>
+<th>主要原因</th>
+<th>优先解法</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>事实性</td>
+<td>编造事实、张冠李戴</td>
+<td>知识缺失&#x2F;错误、知识截止</td>
+<td>RAG、工具、训练</td>
+</tr>
+<tr>
+<td>忠实性</td>
+<td>偏离资料、自相矛盾</td>
+<td>上下文利用不足、指令遵循差</td>
+<td>提示词、引用、微调</td>
+</tr>
+</tbody></table>
+<p>先分清是哪一种，再谈怎么修。很多团队一上来就微调，结果发现是检索没做好，白花算力。</p>
+<h2 id="二、为什么模型会”编”"><a href="#二、为什么模型会”编”" class="headerlink" title="二、为什么模型会”编”"></a>二、为什么模型会”编”</h2><h3 id="2-1-训练目标里没有”真”这个字"><a href="#2-1-训练目标里没有”真”这个字" class="headerlink" title="2.1 训练目标里没有”真”这个字"></a>2.1 训练目标里没有”真”这个字</h3><p>预训练的目标是：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">最大化 P(下一个 token | 前面的 token)</span><br></pre></td></tr></table></figure>
+
+<p>它奖励的是”<strong>像人写的</strong>“，不是”<strong>是真的</strong>“。一个编造得很合理的句子，在语言模型看来可能比一个诚实但生硬的句子”更可能”。</p>
+<p>比如：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">问：爱因斯坦 1921 年获得诺贝尔奖，是因为提出了什么理论？</span><br></pre></td></tr></table></figure>
+
+<p>真实答案是”光电效应”（不是相对论）。但语料里”爱因斯坦—相对论—诺贝尔奖”共现的次数极多，模型很容易顺着最”顺口”的关联说出”相对论”。<strong>统计关联压倒了事实核查。</strong></p>
+<h3 id="2-2-知识是压缩的，而且有损"><a href="#2-2-知识是压缩的，而且有损" class="headerlink" title="2.2 知识是压缩的，而且有损"></a>2.2 知识是压缩的，而且有损</h3><p>模型把海量文本压缩进几百亿参数，不可能逐字保存。高频知识（”北京是中国首都”）记得牢，长尾知识（某篇论文的第三作者、某个小城的邮编）就容易糊。</p>
+<p>更麻烦的是，模型<strong>不知道自己哪里没记住</strong>。它没有”记忆索引”，无法区分”我很确定”和”我在猜”。于是它用同样的自信语气说出两者。</p>
+<h3 id="2-3-知识截止与”不知道”"><a href="#2-3-知识截止与”不知道”" class="headerlink" title="2.3 知识截止与”不知道”"></a>2.3 知识截止与”不知道”</h3><p>模型训练数据有截止日期。截止之后的事，它不知道。但它往往不会说”我不知道”，而是用旧知识硬答：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">问：2026 年世界杯冠军是谁？</span><br><span class="line">（训练数据截止时还没举办）</span><br><span class="line">模型：可能是巴西队，他们阵容强大……</span><br></pre></td></tr></table></figure>
+
+<p>这不是撒谎，是<strong>在缺少信息时仍然要给出一个”最可能的续写”</strong>。</p>
+<h3 id="2-4-上下文太长，注意力被稀释"><a href="#2-4-上下文太长，注意力被稀释" class="headerlink" title="2.4 上下文太长，注意力被稀释"></a>2.4 上下文太长，注意力被稀释</h3><p>即使你把资料贴进去了，模型也不一定用得上。长上下文里，关键信息可能被大量无关内容淹没；放在中间位置的信息尤其容易被忽略（<em>Lost in the Middle</em>）。</p>
+<p>这就是”忠实性幻觉”的常见来源：<strong>资料在，但没被”看见”。</strong></p>
+<h3 id="2-5-解码的随机性"><a href="#2-5-解码的随机性" class="headerlink" title="2.5 解码的随机性"></a>2.5 解码的随机性</h3><p>采样温度高、top-p 大，模型更可能选低概率词，幻觉概率上升。但注意：<strong>温度调到 0 也不能消除幻觉</strong>，它只是减少随机性，不改变模型”不知道”的事实。</p>
+<h3 id="2-6-对齐的副作用：宁可编，不可拒"><a href="#2-6-对齐的副作用：宁可编，不可拒" class="headerlink" title="2.6 对齐的副作用：宁可编，不可拒"></a>2.6 对齐的副作用：宁可编，不可拒</h3><p>SFT&#x2F;RLHF 的数据往往偏好”给出答案”而不是”拒绝回答”。一个总是说”我不知道”的助手，人类评委不喜欢。久而久之，模型学会了<strong>先编一个再说</strong>。</p>
+<p>再加上<strong>谄媚（sycophancy）</strong>：用户说”我觉得是 A”，模型容易顺着说”A 有道理”，哪怕 A 是错的。</p>
+<h3 id="2-7-训练数据本身有错"><a href="#2-7-训练数据本身有错" class="headerlink" title="2.7 训练数据本身有错"></a>2.7 训练数据本身有错</h3><p>网页、论坛、旧文档里充满错误和过时信息。模型不会自动辨别真伪，它只学”什么文本常见”。错误信息被重复得足够多，也会被当成”知识”。</p>
+<h2 id="三、幻觉不是纯粹的-bug"><a href="#三、幻觉不是纯粹的-bug" class="headerlink" title="三、幻觉不是纯粹的 bug"></a>三、幻觉不是纯粹的 bug</h2><p>这里要泼一盆冷水：<strong>只要模型是在”生成”而不是”检索数据库”，幻觉就不可能降为零。</strong></p>
+<p>原因在于”生成”的本质是<strong>在不确定时做最合理的补全</strong>。人类也一样：让你凭记忆画一张没去过的城市地图，你会画出一个”看起来合理”的版本，而不是空白。</p>
+<p>所以工程目标不是”消灭幻觉”，而是：</p>
+<ol>
+<li><strong>降低发生率</strong>：让模型在关键事实上更可靠；</li>
+<li><strong>提高可发现性</strong>：让错误容易被发现（引用、来源、置信度）；</li>
+<li><strong>限制影响面</strong>：高风险场景加人工复核、加工具验证、加兜底。</li>
+</ol>
+<p>一句行业里常说的话：<strong>没有零幻觉的模型，只有可接受的失败率。</strong></p>
+<h2 id="四、缓解手段：从提示词到训练"><a href="#四、缓解手段：从提示词到训练" class="headerlink" title="四、缓解手段：从提示词到训练"></a>四、缓解手段：从提示词到训练</h2><p>按”改动成本”从低到高排：</p>
+<table>
+<thead>
+<tr>
+<th>层级</th>
+<th>手段</th>
+<th>作用</th>
+<th>局限</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>提示词</td>
+<td>要求”只依据资料回答”、要求引用、允许说”不知道”</td>
+<td>低成本，立竿见影</td>
+<td>模型可能不遵守</td>
+</tr>
+<tr>
+<td>解码</td>
+<td>降温度、约束解码、结构化输出</td>
+<td>减少随机性</td>
+<td>不解决知识缺失</td>
+</tr>
+<tr>
+<td>检索</td>
+<td>RAG、搜索、数据库查询</td>
+<td>补充实时&#x2F;私有知识</td>
+<td>检索错就全错</td>
+</tr>
+<tr>
+<td>工具</td>
+<td>计算器、代码执行、API 调用</td>
+<td>把”算”和”查”交给确定性系统</td>
+<td>需要工程接入</td>
+</tr>
+<tr>
+<td>验证</td>
+<td>自我一致性、多模型交叉、规则校验</td>
+<td>发现部分错误</td>
+<td>增加成本&#x2F;延迟</td>
+</tr>
+<tr>
+<td>训练</td>
+<td>事实性 RLHF、拒答数据、过程监督</td>
+<td>改变模型行为</td>
+<td>成本高，可能遗忘</td>
+</tr>
+<tr>
+<td>产品</td>
+<td>显示来源、人工复核、风险分级</td>
+<td>控制影响</td>
+<td>不提升模型本身</td>
+</tr>
+</tbody></table>
+<h3 id="4-1-提示词：先让模型”有据可依”"><a href="#4-1-提示词：先让模型”有据可依”" class="headerlink" title="4.1 提示词：先让模型”有据可依”"></a>4.1 提示词：先让模型”有据可依”</h3><p>一个实用的系统提示：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">你是一个严谨的助手。回答必须遵守：</span><br><span class="line">1. 只能依据【参考资料】回答，不得使用资料之外的知识；</span><br><span class="line">2. 每个关键结论后标注来源编号，如 [1]；</span><br><span class="line">3. 如果资料中没有答案，直接回答&quot;根据现有资料无法确定&quot;，不要猜测；</span><br><span class="line">4. 不要编造引用、数字、日期。</span><br></pre></td></tr></table></figure>
+
+<p>注意第 3 条：<strong>显式允许”不知道”</strong>，比反复强调”要准确”更有效。很多幻觉是因为模型觉得”必须给个答案”。</p>
+<h3 id="4-2-工具：让确定的事交给确定的系统"><a href="#4-2-工具：让确定的事交给确定的系统" class="headerlink" title="4.2 工具：让确定的事交给确定的系统"></a>4.2 工具：让确定的事交给确定的系统</h3><ul>
+<li>算术 → 计算器&#x2F;代码解释器；</li>
+<li>实时信息 → 搜索 API；</li>
+<li>私有数据 → 数据库&#x2F;知识库；</li>
+<li>格式 → JSON Schema 约束解码。</li>
+</ul>
+<p>模型负责”理解意图、组织语言”，工具负责”给出事实”。这是目前最可靠的组合。</p>
+<h3 id="4-3-自我一致性：多问几遍"><a href="#4-3-自我一致性：多问几遍" class="headerlink" title="4.3 自我一致性：多问几遍"></a>4.3 自我一致性：多问几遍</h3><p>对同一个问题采样多次，取多数一致的答案（Self-Consistency）。它对<strong>推理题</strong>有效，因为正确路径往往收敛到同一答案；对开放式事实题效果有限，而且成本翻倍。</p>
+<h3 id="4-4-训练：让”承认不知道”成为好行为"><a href="#4-4-训练：让”承认不知道”成为好行为" class="headerlink" title="4.4 训练：让”承认不知道”成为好行为"></a>4.4 训练：让”承认不知道”成为好行为</h3><p>在 SFT&#x2F;RLHF 数据里加入”资料不足时拒答”的样本，并用偏好数据奖励”有依据的回答”、惩罚”编造”。这能改变模型的默认行为，但需要持续维护，且可能带来过度拒答。</p>
+<h2 id="五、RAG：给模型接一个”开卷考试”"><a href="#五、RAG：给模型接一个”开卷考试”" class="headerlink" title="五、RAG：给模型接一个”开卷考试”"></a>五、RAG：给模型接一个”开卷考试”</h2><p>RAG（Retrieval-Augmented Generation，检索增强生成）是目前最主流的幻觉缓解方案。它的核心思想一句话：</p>
+<blockquote>
+<p><strong>不要让模型凭记忆答题，先帮它把相关资料找出来，放在卷子旁边。</strong></p>
+</blockquote>
+<h3 id="5-1-完整流水线"><a href="#5-1-完整流水线" class="headerlink" title="5.1 完整流水线"></a>5.1 完整流水线</h3><div class="mermaid-wrap"><pre class="mermaid-src" data-config="{}" hidden>
+    flowchart LR
+    Q[&quot;用户问题&quot;] --&gt; QP[&quot;查询改写&#x2F;扩展&quot;]
+    QP --&gt; RET[&quot;检索 Top-k&quot;]
+    KB[&quot;文档库&quot;] --&gt; PARSE[&quot;解析&#x2F;清洗&quot;] --&gt; CHUNK[&quot;分块&quot;] --&gt; EMB[&quot;向量化&quot;] --&gt; VDB[&quot;向量库&quot;]
+    VDB --&gt; RET
+    RET --&gt; RR[&quot;重排序 Rerank&quot;]
+    RR --&gt; CTX[&quot;组装上下文&quot;]
+    CTX --&gt; LLM[&quot;大模型生成&quot;]
+    LLM --&gt; ANS[&quot;答案 + 引用&quot;]
+    ANS --&gt; EVAL[&quot;评估&#x2F;兜底&quot;]
+  </pre></div>
+
+<p>拆开看每一步：</p>
+<ol>
+<li><strong>文档解析</strong>：PDF、Word、网页、数据库，先转成纯文本；</li>
+<li><strong>清洗</strong>：去页眉页脚、去乱码、保留标题层级；</li>
+<li><strong>分块（chunking）</strong>：把长文档切成几百字的片段，块间留重叠；</li>
+<li><strong>向量化（embedding）</strong>：用嵌入模型把每个块变成向量；</li>
+<li><strong>建索引</strong>：存进向量库（FAISS、Milvus、pgvector 等）；</li>
+<li><strong>查询改写</strong>：把用户口语化的问题改写成适合检索的查询；</li>
+<li><strong>检索</strong>：找最相似的 top-k 个块；</li>
+<li><strong>重排序（rerank）</strong>：用交叉编码器对候选精排，取最相关的几个；</li>
+<li><strong>组装 prompt</strong>：把资料、问题、回答要求拼在一起；</li>
+<li><strong>生成</strong>：模型基于资料回答，并标注引用；</li>
+<li><strong>评估与兜底</strong>：检索分数低、资料冲突时，触发”不知道”或转人工。</li>
+</ol>
+<h3 id="5-2-为什么-RAG-能降低幻觉"><a href="#5-2-为什么-RAG-能降低幻觉" class="headerlink" title="5.2 为什么 RAG 能降低幻觉"></a>5.2 为什么 RAG 能降低幻觉</h3><ul>
+<li>模型不需要”记住”，只需要”读”；</li>
+<li>资料是最新的、私有的、可追溯的；</li>
+<li>回答可以附来源，方便核对；</li>
+<li>资料里没有的，可以明确说”没有”。</li>
+</ul>
+<p>但 RAG 不是银弹：<strong>检索错了，模型会一本正经地根据错误资料回答</strong>，而且看起来更有说服力。这叫”garbage in, garbage out”。</p>
+<h2 id="六、手撕一个迷你-RAG"><a href="#六、手撕一个迷你-RAG" class="headerlink" title="六、手撕一个迷你 RAG"></a>六、手撕一个迷你 RAG</h2><p>下面这段代码不依赖任何第三方库，用”字符二元组 + TF-IDF + 余弦相似度”实现检索，把 RAG 的骨架跑通。</p>
+<h3 id="6-1-文档与分块"><a href="#6-1-文档与分块" class="headerlink" title="6.1 文档与分块"></a>6.1 文档与分块</h3><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">import</span> math</span><br><span class="line"><span class="keyword">import</span> re</span><br><span class="line"><span class="keyword">from</span> collections <span class="keyword">import</span> Counter</span><br><span class="line"></span><br><span class="line">DOCS = [</span><br><span class="line">    (<span class="string">&#x27;员工手册-年假&#x27;</span>, <span class="string">&#x27;员工入职满一年可享受 5 天年假，满三年 10 天，满五年 15 天。&#x27;</span></span><br><span class="line">                      <span class="string">&#x27;年假需提前 3 个工作日在 OA 系统提交申请，经直属主管批准后生效。&#x27;</span></span><br><span class="line">                      <span class="string">&#x27;当年未休完的年假最多结转 5 天到次年。&#x27;</span>),</span><br><span class="line">    (<span class="string">&#x27;员工手册-报销&#x27;</span>, <span class="string">&#x27;差旅住宿标准：一线城市每晚不超过 600 元，二线城市每晚不超过 400 元，&#x27;</span></span><br><span class="line">                      <span class="string">&#x27;其他城市每晚不超过 300 元。发票需在费用发生后 30 天内提交。&#x27;</span>),</span><br><span class="line">    (<span class="string">&#x27;员工手册-远程办公&#x27;</span>, <span class="string">&#x27;员工每周最多可申请 2 天远程办公，需提前一天获得直属主管批准。&#x27;</span></span><br><span class="line">                          <span class="string">&#x27;远程办公期间须保持在线，参加视频会议时需开启摄像头。&#x27;</span>),</span><br><span class="line">    (<span class="string">&#x27;员工手册-培训&#x27;</span>, <span class="string">&#x27;公司为每位员工提供每年 5000 元的学习预算，可用于课程、书籍和认证考试。&#x27;</span></span><br><span class="line">                      <span class="string">&#x27;使用预算需提前在 OA 提交申请，课程结束后 10 个工作日内提交学习心得。&#x27;</span>),</span><br><span class="line">    (<span class="string">&#x27;员工手册-设备&#x27;</span>, <span class="string">&#x27;入职时配发笔记本电脑和显示器。笔记本使用满 3 年可申请换新，&#x27;</span></span><br><span class="line">                      <span class="string">&#x27;显示器使用满 5 年可申请换新。设备人为损坏需说明原因。&#x27;</span>),</span><br><span class="line">    (<span class="string">&#x27;员工手册-班车&#x27;</span>, <span class="string">&#x27;公司提供早晚班车，覆盖地铁 1 号线和 5 号线沿线。班车座位需提前一天预约，&#x27;</span></span><br><span class="line">                      <span class="string">&#x27;未预约不能乘车。加班到 21 点后可申请打车报销。&#x27;</span>),</span><br><span class="line">]</span><br><span class="line"></span><br><span class="line"><span class="keyword">def</span> <span class="title function_">chunk_text</span>(<span class="params">text, size=<span class="number">70</span>, overlap=<span class="number">10</span></span>):</span><br><span class="line">    chunks, start = [], <span class="number">0</span></span><br><span class="line">    <span class="keyword">while</span> start &lt; <span class="built_in">len</span>(text):</span><br><span class="line">        end = <span class="built_in">min</span>(start + size, <span class="built_in">len</span>(text))</span><br><span class="line">        chunks.append(text[start:end])</span><br><span class="line">        <span class="keyword">if</span> end == <span class="built_in">len</span>(text):</span><br><span class="line">            <span class="keyword">break</span></span><br><span class="line">        start = end - overlap          <span class="comment"># 块之间留 10 个字的重叠</span></span><br><span class="line">    <span class="keyword">return</span> chunks</span><br><span class="line"></span><br><span class="line">chunks = []</span><br><span class="line"><span class="keyword">for</span> title, text <span class="keyword">in</span> DOCS:</span><br><span class="line">    <span class="keyword">for</span> i, piece <span class="keyword">in</span> <span class="built_in">enumerate</span>(chunk_text(text)):</span><br><span class="line">        chunks.append(&#123;<span class="string">&#x27;title&#x27;</span>: title, <span class="string">&#x27;chunk_id&#x27;</span>: i, <span class="string">&#x27;text&#x27;</span>: piece&#125;)</span><br></pre></td></tr></table></figure>
+
+<p>为什么要重叠？因为一句话可能正好被切断。重叠能让相邻块都保留完整的语义片段。</p>
+<h3 id="6-2-检索：TF-IDF-余弦"><a href="#6-2-检索：TF-IDF-余弦" class="headerlink" title="6.2 检索：TF-IDF + 余弦"></a>6.2 检索：TF-IDF + 余弦</h3><p>中文没有空格，这里用<strong>字符二元组</strong>当 token：<code>&quot;年假有几天&quot;</code> → <code>[&quot;年假&quot;, &quot;假有&quot;, &quot;有几&quot;, &quot;几天&quot;]</code>。</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">def</span> <span class="title function_">tokenize</span>(<span class="params">text</span>):</span><br><span class="line">    text = re.sub(<span class="string">r&#x27;\s+&#x27;</span>, <span class="string">&#x27;&#x27;</span>, text)</span><br><span class="line">    <span class="keyword">return</span> [text[i:i+<span class="number">2</span>] <span class="keyword">for</span> i <span class="keyword">in</span> <span class="built_in">range</span>(<span class="built_in">len</span>(text)-<span class="number">1</span>)]</span><br><span class="line"></span><br><span class="line"><span class="comment"># 统计每个 token 出现在多少个块里（文档频率）</span></span><br><span class="line">df = Counter()</span><br><span class="line"><span class="keyword">for</span> c <span class="keyword">in</span> chunks:</span><br><span class="line">    <span class="keyword">for</span> t <span class="keyword">in</span> <span class="built_in">set</span>(tokenize(c[<span class="string">&#x27;text&#x27;</span>])):</span><br><span class="line">        df[t] += <span class="number">1</span></span><br><span class="line">idf = &#123;t: math.log((<span class="built_in">len</span>(chunks)+<span class="number">1</span>)/(df[t]+<span class="number">1</span>)) + <span class="number">1</span> <span class="keyword">for</span> t <span class="keyword">in</span> df&#125;</span><br><span class="line"></span><br><span class="line"><span class="keyword">def</span> <span class="title function_">tfidf_vec</span>(<span class="params">text</span>):</span><br><span class="line">    toks = tokenize(text)</span><br><span class="line">    tf = Counter(toks)</span><br><span class="line">    vec = &#123;t: (n/<span class="built_in">len</span>(toks)) * idf.get(t, <span class="number">0</span>) <span class="keyword">for</span> t, n <span class="keyword">in</span> tf.items()&#125;</span><br><span class="line">    norm = math.sqrt(<span class="built_in">sum</span>(v*v <span class="keyword">for</span> v <span class="keyword">in</span> vec.values())) <span class="keyword">or</span> <span class="number">1.0</span></span><br><span class="line">    <span class="keyword">return</span> &#123;t: v/norm <span class="keyword">for</span> t, v <span class="keyword">in</span> vec.items()&#125;</span><br><span class="line"></span><br><span class="line"><span class="keyword">def</span> <span class="title function_">retrieve</span>(<span class="params">query, top_k=<span class="number">2</span></span>):</span><br><span class="line">    qv = tfidf_vec(query)</span><br><span class="line">    scored = [(<span class="built_in">sum</span>(v * c[<span class="string">&#x27;vec&#x27;</span>].get(t, <span class="number">0</span>) <span class="keyword">for</span> t, v <span class="keyword">in</span> qv.items()), c) <span class="keyword">for</span> c <span class="keyword">in</span> chunks]</span><br><span class="line">    <span class="keyword">return</span> <span class="built_in">sorted</span>(scored, key=<span class="keyword">lambda</span> x: x[<span class="number">0</span>], reverse=<span class="literal">True</span>)[:top_k]</span><br><span class="line"></span><br><span class="line"><span class="keyword">for</span> c <span class="keyword">in</span> chunks:                       <span class="comment"># 建索引时提前算好每个块的向量</span></span><br><span class="line">    c[<span class="string">&#x27;vec&#x27;</span>] = tfidf_vec(c[<span class="string">&#x27;text&#x27;</span>])</span><br></pre></td></tr></table></figure>
+
+<p>真实运行结果（节选，分数为余弦相似度）：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line">问题: 年假有几天？</span><br><span class="line">  [0.231] 员工手册-年假#0: 员工入职满一年可享受 5 天年假，满三年 10 天，满五年 15 天。...</span><br><span class="line">  [0.178] 员工手册-年假#1: 直属主管批准后生效。当年未休完的年假最多结转 5 天到次年。...</span><br><span class="line"></span><br><span class="line">问题: 出差住宿能报多少钱？</span><br><span class="line">  [0.097] 员工手册-报销#0: 差旅住宿标准：一线城市每晚不超过 600 元，二线城市每晚不超过 400 元...</span><br><span class="line"></span><br><span class="line">问题: 笔记本用多久可以换新？</span><br><span class="line">  [0.394] 员工手册-设备#0: 入职时配发笔记本电脑和显示器。笔记本使用满 3 年可申请换新...</span><br><span class="line"></span><br><span class="line">问题: 可以带宠物上班吗？</span><br><span class="line">  [0.000] 员工手册-年假#0: ...</span><br><span class="line">  -&gt; 检索分数过低，触发&quot;不知道&quot;兜底</span><br></pre></td></tr></table></figure>
+
+<p>最后一行是关键：<strong>当所有检索分数都接近 0 时，不要硬答</strong>。生产系统里这个阈值要基于验证集调，而不是拍脑袋。</p>
+<h3 id="6-3-组装-prompt"><a href="#6-3-组装-prompt" class="headerlink" title="6.3 组装 prompt"></a>6.3 组装 prompt</h3><p>检索到资料后，把它拼进提示词：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line">你是一个严谨的公司制度助手，只能依据【参考资料】回答。</span><br><span class="line">资料中没有答案时，回答&quot;根据现有资料无法确定&quot;，不要猜测。</span><br><span class="line">每个结论后标注来源编号。</span><br><span class="line"></span><br><span class="line">【参考资料】</span><br><span class="line">[1] 员工手册-年假#0：员工入职满一年可享受 5 天年假，满三年 10 天，满五年 15 天。……</span><br><span class="line">[2] 员工手册-年假#1：直属主管批准后生效。当年未休完的年假最多结转 5 天到次年。</span><br><span class="line"></span><br><span class="line">【问题】年假有几天？</span><br></pre></td></tr></table></figure>
+
+<p>模型就能给出：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">根据资料，入职满一年 5 天，满三年 10 天，满五年 15 天 [1]。</span><br><span class="line">未休完的年假最多结转 5 天到次年 [2]。</span><br></pre></td></tr></table></figure>
+
+<h3 id="6-4-这个玩具和工业级-RAG-差在哪"><a href="#6-4-这个玩具和工业级-RAG-差在哪" class="headerlink" title="6.4 这个玩具和工业级 RAG 差在哪"></a>6.4 这个玩具和工业级 RAG 差在哪</h3><table>
+<thead>
+<tr>
+<th>环节</th>
+<th>玩具版</th>
+<th>工业版</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>分词</td>
+<td>字符二元组</td>
+<td>专用 tokenizer &#x2F; 嵌入模型</td>
+</tr>
+<tr>
+<td>检索</td>
+<td>TF-IDF 余弦</td>
+<td>向量检索 + BM25 混合</td>
+</tr>
+<tr>
+<td>排序</td>
+<td>无</td>
+<td>Cross-Encoder 重排</td>
+</tr>
+<tr>
+<td>分块</td>
+<td>定长切</td>
+<td>按标题&#x2F;语义切，保留元数据</td>
+</tr>
+<tr>
+<td>文档解析</td>
+<td>纯文本</td>
+<td>PDF&#x2F;表格&#x2F;OCR&#x2F;多模态</td>
+</tr>
+<tr>
+<td>兜底</td>
+<td>分数阈值</td>
+<td>置信度 + 规则 + 人工</td>
+</tr>
+<tr>
+<td>评估</td>
+<td>肉眼看</td>
+<td>recall@k、忠实性、A&#x2F;B</td>
+</tr>
+</tbody></table>
+<p>但骨架是一样的：<strong>分块 → 索引 → 检索 → 组装 → 生成 → 兜底</strong>。把这个流程跑通，再换更好的组件，就不会迷路。</p>
+<h2 id="七、RAG-的七个坑"><a href="#七、RAG-的七个坑" class="headerlink" title="七、RAG 的七个坑"></a>七、RAG 的七个坑</h2><h3 id="坑-1：块切得太大或太小"><a href="#坑-1：块切得太大或太小" class="headerlink" title="坑 1：块切得太大或太小"></a>坑 1：块切得太大或太小</h3><ul>
+<li>太大：一个块里混着多个主题，检索精度下降，噪声变多；</li>
+<li>太小：语义不完整，答案被切碎，模型拼不起来。</li>
+</ul>
+<p>经验值：中文 200<del>500 字一块，重叠 10%</del>20%。但<strong>没有万能值</strong>，要按文档类型调：合同按条款切，论文按章节切，FAQ 按问答对切。</p>
+<h3 id="坑-2：只看关键词，不懂语义"><a href="#坑-2：只看关键词，不懂语义" class="headerlink" title="坑 2：只看关键词，不懂语义"></a>坑 2：只看关键词，不懂语义</h3><p>用户问”如何请假”，文档写”休假申请流程”，关键词不重合，TF-IDF 就找不到。向量检索能缓解，但也会有”语义漂移”。工业界常用<strong>混合检索</strong>：BM25 保关键词，向量保语义，再融合排序。</p>
+<h3 id="坑-3：多跳问题"><a href="#坑-3：多跳问题" class="headerlink" title="坑 3：多跳问题"></a>坑 3：多跳问题</h3><p>问：”我们公司年假比法定多几天？” 需要先查公司年假，再查法定年假，再做减法。单次检索只能拿到一半资料。</p>
+<p>解法：查询分解（把问题拆成子问题）、多轮检索、Agent 式”边查边想”。</p>
+<h3 id="坑-4：表格和图片"><a href="#坑-4：表格和图片" class="headerlink" title="坑 4：表格和图片"></a>坑 4：表格和图片</h3><p>PDF 里的表格被解析成乱序文本，金额、日期全错位。需要专门的表格解析（如把表格转成 Markdown），或者多模态模型直接读图。</p>
+<h3 id="坑-5：资料冲突与时效"><a href="#坑-5：资料冲突与时效" class="headerlink" title="坑 5：资料冲突与时效"></a>坑 5：资料冲突与时效</h3><p>知识库里有新旧两版制度，检索都召回了，模型可能各取一半。需要<strong>元数据（版本、生效日期）</strong>，并在 prompt 里说明”以最新版本为准”。</p>
+<h3 id="坑-6：把不相关的内容也塞进去"><a href="#坑-6：把不相关的内容也塞进去" class="headerlink" title="坑 6：把不相关的内容也塞进去"></a>坑 6：把不相关的内容也塞进去</h3><p>top-k 取太大，噪声淹没信号；取太小，可能漏掉关键信息。<strong>重排序</strong>和<strong>动态 k</strong>（分数低于阈值就丢弃）比固定 k 更稳。</p>
+<h3 id="坑-7：没有评估"><a href="#坑-7：没有评估" class="headerlink" title="坑 7：没有评估"></a>坑 7：没有评估</h3><p>“感觉回答变好了”不是评估。没有评估集，你无法知道换 embedding、改分块、加 rerank 到底有没有用，甚至可能越改越差。</p>
+<h2 id="八、怎么评估一个-RAG-系统"><a href="#八、怎么评估一个-RAG-系统" class="headerlink" title="八、怎么评估一个 RAG 系统"></a>八、怎么评估一个 RAG 系统</h2><p>评估要拆成两段：<strong>检索质量</strong>和<strong>生成质量</strong>。</p>
+<h3 id="8-1-检索评估"><a href="#8-1-检索评估" class="headerlink" title="8.1 检索评估"></a>8.1 检索评估</h3><p>准备一批”问题 → 标准答案所在文档”的标注，然后看：</p>
+<table>
+<thead>
+<tr>
+<th>指标</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Recall@k</td>
+<td>正确答案是否在前 k 个结果里</td>
+</tr>
+<tr>
+<td>Precision@k</td>
+<td>前 k 个里有多少是相关的</td>
+</tr>
+<tr>
+<td>MRR</td>
+<td>第一个相关结果排在第几位</td>
+</tr>
+<tr>
+<td>Hit Rate</td>
+<td>至少命中一个相关结果的问题比例</td>
+</tr>
+</tbody></table>
+<p>如果 Recall@5 只有 60%，后面生成再强也只能答对 60%。</p>
+<h3 id="8-2-生成评估"><a href="#8-2-生成评估" class="headerlink" title="8.2 生成评估"></a>8.2 生成评估</h3><table>
+<thead>
+<tr>
+<th>指标</th>
+<th>含义</th>
+<th>怎么测</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>正确率</td>
+<td>答案对不对</td>
+<td>人工标注 &#x2F; 标准答案比对</td>
+</tr>
+<tr>
+<td>忠实性（Faithfulness）</td>
+<td>是否忠于检索资料</td>
+<td>人工核查 &#x2F; NLI 模型 &#x2F; LLM 评审</td>
+</tr>
+<tr>
+<td>引用准确率</td>
+<td>标注的来源对不对</td>
+<td>规则校验 + 人工抽查</td>
+</tr>
+<tr>
+<td>拒答率</td>
+<td>该拒答时是否拒答</td>
+<td>构造”资料中没有”的问题</td>
+</tr>
+<tr>
+<td>幻觉率</td>
+<td>编造事实的比例</td>
+<td>人工标注 &#x2F; 事实核查</td>
+</tr>
+</tbody></table>
+<h3 id="8-3-建一个-50-条的小评估集"><a href="#8-3-建一个-50-条的小评估集" class="headerlink" title="8.3 建一个 50 条的小评估集"></a>8.3 建一个 50 条的小评估集</h3><p>不需要一上来就搞几千条。先挑 50 个真实问题，覆盖：</p>
+<ul>
+<li>常见问题（应该答对）；</li>
+<li>边界问题（资料里有但不直接）；</li>
+<li>无答案问题（应该拒答）；</li>
+<li>多跳问题（需要组合）；</li>
+<li>易混淆问题（相似但不同）。</li>
+</ul>
+<p>每次改动后跑一遍，记录指标。<strong>没有评估集的 RAG 优化，都是玄学。</strong></p>
+<h3 id="8-4-LLM-as-a-Judge-要谨慎"><a href="#8-4-LLM-as-a-Judge-要谨慎" class="headerlink" title="8.4 LLM-as-a-Judge 要谨慎"></a>8.4 LLM-as-a-Judge 要谨慎</h3><p>用 GPT-4 当评委很方便，但要注意：</p>
+<ul>
+<li>评委也有偏好（喜欢长答案、喜欢自信语气）；</li>
+<li>评委可能被答案的格式误导；</li>
+<li>评委和人类的一致性需要校准。</li>
+</ul>
+<p>最好人工抽检 10%~20%，和自动评分对齐后再大规模用。</p>
+<h2 id="九、RAG、微调、长上下文：怎么选"><a href="#九、RAG、微调、长上下文：怎么选" class="headerlink" title="九、RAG、微调、长上下文：怎么选"></a>九、RAG、微调、长上下文：怎么选</h2><table>
+<thead>
+<tr>
+<th>需求</th>
+<th>首选</th>
+<th>原因</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>私有知识、频繁更新</td>
+<td>RAG</td>
+<td>改知识库即可，不用重训</td>
+</tr>
+<tr>
+<td>固定领域风格&#x2F;格式</td>
+<td>微调（SFT&#x2F;LoRA）</td>
+<td>学行为，不学事实</td>
+</tr>
+<tr>
+<td>一次性长文档理解</td>
+<td>长上下文</td>
+<td>全文都在，跨段关联</td>
+</tr>
+<tr>
+<td>实时信息</td>
+<td>搜索工具</td>
+<td>训练数据永远滞后</td>
+</tr>
+<tr>
+<td>精确计算</td>
+<td>代码&#x2F;计算器</td>
+<td>生成模型不擅长算术</td>
+</tr>
+<tr>
+<td>多跳复杂查询</td>
+<td>Agent + RAG</td>
+<td>边查边推理</td>
+</tr>
+</tbody></table>
+<p>它们不是互斥的。一个成熟系统往往是：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">RAG 召回 → 长上下文整合 → 微调模型控制风格 → 工具校验关键数字 → 引用与人工复核</span><br></pre></td></tr></table></figure>
+
+<h2 id="十、常见疑问"><a href="#十、常见疑问" class="headerlink" title="十、常见疑问"></a>十、常见疑问</h2><p><strong>Q1：RAG 能彻底消除幻觉吗？</strong><br>不能。检索错、资料错、模型误读、资料冲突，都会导致新的幻觉。RAG 把”凭记忆编”变成”开卷考试”，但开卷也可能抄错。</p>
+<p><strong>Q2：直接把整篇文档塞进长上下文，不比 RAG 好吗？</strong><br>短文档可以，长文档不行：贵、慢、中间信息容易丢、无法引用、无法更新。RAG 是”先筛后读”，长上下文是”全读”，各有适用场景。</p>
+<p><strong>Q3：微调能减少幻觉吗？</strong><br>能改善”行为”（比如学会拒答、学会引用格式），但不能可靠地注入新事实。用微调记知识，既贵又容易忘，不如 RAG。</p>
+<p><strong>Q4：温度调到 0，幻觉就没了吗？</strong><br>没有。温度只影响采样随机性，不改变模型的知识空缺。它会让输出更稳定，但稳定地错也是错。</p>
+<p><strong>Q5：怎么让模型说”我不知道”？</strong><br>三件事一起做：提示词明确允许拒答；SFT 数据加入”资料不足时拒答”的样本；评估体系奖励”该拒答时拒答”，而不是只奖励”答对”。</p>
+<p><strong>Q6：小模型 + RAG 能替代大模型吗？</strong><br>很多场景可以。RAG 把”知识”外置后，小模型负责”理解和表达”，成本大幅下降。但复杂推理、多跳整合仍然更依赖模型能力。先做 RAG，再根据 bad case 决定要不要换更大的模型。</p>
+<h2 id="十一、总结"><a href="#十一、总结" class="headerlink" title="十一、总结"></a>十一、总结</h2><p>把这一篇压缩成一条链：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line">幻觉</span><br><span class="line">  ├─ 事实性：不知道 / 记错 / 知识截止</span><br><span class="line">  │     → RAG、工具、训练</span><br><span class="line">  └─ 忠实性：没看资料 / 看漏了 / 自相矛盾</span><br><span class="line">        → 提示词、引用、长上下文优化、微调</span><br><span class="line"></span><br><span class="line">RAG</span><br><span class="line">  文档 → 解析 → 分块 → 向量化 → 索引</span><br><span class="line">  问题 → 改写 → 检索 → 重排 → 组装 → 生成 → 引用 → 兜底</span><br><span class="line">  评估：Recall@k / 正确率 / 忠实性 / 拒答率</span><br></pre></td></tr></table></figure>
+
+<p>记住五句话：</p>
+<ol>
+<li><strong>幻觉是生成模型的结构性副产品，不可能归零，只能管理。</strong></li>
+<li><strong>先分清事实性还是忠实性</strong>，再决定用 RAG、提示词还是微调。</li>
+<li><strong>RAG 的核心不是”接个大模型”，而是”检索得准”</strong>；检索错了，生成只会更自信地错。</li>
+<li><strong>允许模型说”不知道”</strong>，比反复要求”要准确”更有效。</li>
+<li><strong>没有评估集，就没有优化</strong>；先建 50 条，再谈调优。</li>
+</ol>
+<p>动手建议：</p>
+<ol>
+<li>跑一遍第六节的代码，换成你自己的文档，看看检索结果；</li>
+<li>故意问一个资料里没有的问题，观察阈值兜底是否触发；</li>
+<li>把同一份资料分别用”整篇塞入”和”分块检索”两种方式喂给模型，对比准确率和成本；</li>
+<li>建一个 50 条的小评估集，记录 Recall@5 和忠实性，作为后续优化的基线；</li>
+<li>读一读 RAG 原论文（Lewis et al., 2020）和 <em>Lost in the Middle</em>，理解 Retrieval 与 Generation 的边界。</li>
+</ol>
+<p>写到这里，「大模型基础」系列就告一段落了。我们从 token 出发，经过 GPT 结构、采样、训练、上下文，最后落到幻觉与 RAG。你会发现，这些看似独立的名词，其实串成了一条完整的链路：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">文字 → token → 向量 → 注意力 → 概率分布 → 采样 → 输出</span><br><span class="line">                  ↑</span><br><span class="line">              预训练 / SFT / 对齐</span><br><span class="line">                  ↑</span><br><span class="line">              上下文 / KV Cache / RAG</span><br></pre></td></tr></table></figure>
+
+<p>理解这条链路，你再看任何新模型、新框架、新论文，都不会从零开始。</p>
+<hr>
+<p><strong>本系列其他文章：</strong></p>
+<ul>
+<li><a href="/2026/10/23/mini-gpt-from-scratch/" title="手撕迷你 GPT（逐行代码）：从&quot;预测下一个字&quot;到会写句子">手撕迷你 GPT：从预测下一个字到会写句子</a></li>
+<li><a href="/2026/10/26/tokenizer-bpe-explained/" title="大模型眼里的文字：手撕 Tokenizer 与 BPE 分词">大模型眼里的文字：手撕 Tokenizer 与 BPE 分词</a></li>
+<li><a href="/2026/10/28/llm-sampling-decoding/" title="温度、Top-k 与 Top-p：大模型是怎么&quot;挑词&quot;的">温度、Top-k 与 Top-p：大模型是怎么&quot;挑词&quot;的</a></li>
+<li><a href="/2026/10/30/llm-training-pipeline/" title="大模型是怎么炼成的：预训练、SFT 与对齐">大模型是怎么炼成的：预训练、SFT 与对齐</a></li>
+<li><a href="/2026/11/01/context-window-kv-cache/" title="上下文窗口与 KV Cache：大模型的&quot;记忆&quot;为什么又贵又短">上下文窗口与 KV Cache：大模型的记忆为什么又贵又短</a></li>
+</ul>
+</article><div class="post-copyright"><div class="post-copyright__author"><span class="post-copyright-meta"><i class="fas fa-circle-user fa-fw"></i>文章作者: </span><span class="post-copyright-info"><a href="https://chenhui05.github.io">CHENHUI</a></span></div><div class="post-copyright__type"><span class="post-copyright-meta"><i class="fas fa-square-arrow-up-right fa-fw"></i>文章链接: </span><span class="post-copyright-info"><a href="https://chenhui05.github.io/2026/11/02/llm-hallucination-rag/">https://chenhui05.github.io/2026/11/02/llm-hallucination-rag/</a></span></div><div class="post-copyright__notice"><span class="post-copyright-meta"><i class="fas fa-circle-exclamation fa-fw"></i>版权声明: </span><span class="post-copyright-info">本博客所有文章除特别声明外，均采用 <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/" target="_blank">CC BY-NC-SA 4.0</a> 许可协议。转载请注明来源 <a href="https://chenhui05.github.io" target="_blank">CHENHUI的博客</a>！</span></div></div><div class="tag_share"><div class="post-meta__tag-list"><a class="post-meta__tags" href="/tags/%E5%A4%A7%E6%A8%A1%E5%9E%8B%E5%9F%BA%E7%A1%80/">大模型基础</a><a class="post-meta__tags" href="/tags/%E5%B9%BB%E8%A7%89/">幻觉</a><a class="post-meta__tags" href="/tags/RAG/">RAG</a><a class="post-meta__tags" href="/tags/%E6%A3%80%E7%B4%A2%E5%A2%9E%E5%BC%BA/">检索增强</a><a class="post-meta__tags" href="/tags/%E5%A4%A7%E6%A8%A1%E5%9E%8B/">大模型</a></div><div class="post-share"><div class="social-share" data-image="/img/avatar.jpg" data-sites="facebook,x,wechat,weibo,qq"></div><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/butterfly-extsrc@1.1.6/sharejs/dist/css/share.min.css" media="print" onload="this.media='all'"><script src="https://cdn.jsdelivr.net/npm/butterfly-extsrc@1.1.6/sharejs/dist/js/social-share.min.js" defer></script></div></div><nav class="pagination-post" id="pagination"><a class="pagination-related full-width" href="/2026/11/01/context-window-kv-cache/" title="上下文窗口与 KV Cache：大模型的&quot;记忆&quot;为什么又贵又短"><div class="cover" style="background: var(--default-bg-color)"></div><div class="info text-right"><div class="info-1"><div class="info-item-1">下一篇</div><div class="info-item-2">上下文窗口与 KV Cache：大模型的"记忆"为什么又贵又短</div></div><div class="info-2"><div class="info-item-1">写在前面模型厂商的宣传页上，”128k 上下文””1M 超长上下文”的字样越来越常见。听起来像是：只要把整本书塞进去，模型就能全部记住、全部理解。 但真正用过的人会发现问题：  塞进去 10 万字，首 token 要等十几秒； 明明资料就在中间，模型却答”文中没有提到”； 开两个长对话，显卡显存就爆了； 同一个模型，8k 上下文很聪明，128k 上下文反而变笨。  这些现象指向大模型架构里两个绕不开的关键词：上下文窗口（context window） 和 KV Cache。 这一篇我们不讲虚的，直接从公式和真实数字出发，回答四个问题：  上下文窗口到底是什么，为什么不能无限大？ 为什么长上下文又慢又贵？钱花在哪了？ KV Cache 是什么，一个 token 到底占多少显存？ “长上下文”和”真记住”是一回事吗？什么时候该用 RAG？  这是「大模型基础」系列的第五篇。前面我们讲了 token、GPT 结构、采样和训练；这一篇讲推理阶段最现实的约束：显存和算力。   一、上下文窗口：模型的工作台，不是硬盘1.1 它到底是什么上下文窗口指的是：模型在一次请求中能处理的最大 toke...</div></div></div></a></nav><div class="relatedPosts"><div class="headline"><i class="fas fa-thumbs-up fa-fw"></i><span>相关推荐</span></div><div class="relatedPosts-list"><a class="pagination-related" href="/2026/10/28/llm-sampling-decoding/" title="温度、Top-k 与 Top-p：大模型是怎么&quot;挑词&quot;的"><div class="cover" style="background: var(--default-bg-color)"></div><div class="info text-center"><div class="info-1"><div class="info-item-1"><i class="far fa-calendar-alt fa-fw"></i> 2026-10-28</div><div class="info-item-2">温度、Top-k 与 Top-p：大模型是怎么&quot;挑词&quot;的</div></div><div class="info-2"><div class="info-item-1">写在前面你有没有遇到过这种情况：  同一个问题问两遍，一次答得中规中矩，一次脑洞大开； 把 temperature 从 0.7 调到 1.2，模型突然开始胡言乱语； 明明设了 temperature=0，两次调用结果还是有细微差别； 写代码时希望它稳定，写文案时希望它活泼，却不知道参数该怎么配。  这些都不是玄学，而是**解码策略（decoding strategy）**在起作用。 大模型每生成一个 token，输出的不是一个确定的词，而是整个词表上的一个概率分布。从”分布”到”最终选哪个词”，中间那一步就是采样。温度、Top-k、Top-p 都是在对这个分布做手术。 这一篇我们把手术刀拆开：  logits 和 softmax 到底算出了什么； 贪心、温度、Top-k、Top-p 分别在改什么； 用真实数字看温度如何把分布”压尖”或”摊平”； 用 30 行纯 Python 写一个二元语言模型，亲眼看到”保守”和”发疯”的差别； 不同任务到底该怎么配参数。  这是「大模型基础」系列的第三篇。前两篇分别手撕了迷你 GPT 和 Tokenizer，这一篇接着讲：模型吐出概率之后，发生...</div></div></div></a><a class="pagination-related" href="/2026/11/01/context-window-kv-cache/" title="上下文窗口与 KV Cache：大模型的&quot;记忆&quot;为什么又贵又短"><div class="cover" style="background: var(--default-bg-color)"></div><div class="info text-center"><div class="info-1"><div class="info-item-1"><i class="far fa-calendar-alt fa-fw"></i> 2026-11-01</div><div class="info-item-2">上下文窗口与 KV Cache：大模型的&quot;记忆&quot;为什么又贵又短</div></div><div class="info-2"><div class="info-item-1">写在前面模型厂商的宣传页上，”128k 上下文””1M 超长上下文”的字样越来越常见。听起来像是：只要把整本书塞进去，模型就能全部记住、全部理解。 但真正用过的人会发现问题：  塞进去 10 万字，首 token 要等十几秒； 明明资料就在中间，模型却答”文中没有提到”； 开两个长对话，显卡显存就爆了； 同一个模型，8k 上下文很聪明，128k 上下文反而变笨。  这些现象指向大模型架构里两个绕不开的关键词：上下文窗口（context window） 和 KV Cache。 这一篇我们不讲虚的，直接从公式和真实数字出发，回答四个问题：  上下文窗口到底是什么，为什么不能无限大？ 为什么长上下文又慢又贵？钱花在哪了？ KV Cache 是什么，一个 token 到底占多少显存？ “长上下文”和”真记住”是一回事吗？什么时候该用 RAG？  这是「大模型基础」系列的第五篇。前面我们讲了 token、GPT 结构、采样和训练；这一篇讲推理阶段最现实的约束：显存和算力。   一、上下文窗口：模型的工作台，不是硬盘1.1 它到底是什么上下文窗口指的是：模型在一次请求中能处理的最大 toke...</div></div></div></a><a class="pagination-related" href="/2026/10/26/tokenizer-bpe-explained/" title="大模型眼里的文字：手撕 Tokenizer 与 BPE 分词"><div class="cover" style="background: var(--default-bg-color)"></div><div class="info text-center"><div class="info-1"><div class="info-item-1"><i class="far fa-calendar-alt fa-fw"></i> 2026-10-26</div><div class="info-item-2">大模型眼里的文字：手撕 Tokenizer 与 BPE 分词</div></div><div class="info-2"><div class="info-item-1">写在前面你给大模型 API 付的钱，是按 token 算的，不是按字数，也不是按单词数。 同样一段意思，写成英文可能只要 20 个 token，写成中文可能要 35 个；同一个问题问两遍，第二次如果多了几个空格，token 数也可能变化。更诡异的是，很多人发现模型数不清 strawberry 里有几个 r——因为在它眼里，strawberry 根本不是由字母组成的，而是一两个整体编号。 这些现象背后是同一个东西：Tokenizer（分词器）。 它是大模型流水线的第一道工序，也是最多人忽略的一道。模型再聪明，也只能处理分词器递给它的那串整数。这一篇我们就把它拆开：  为什么不能直接按”字”或按”词”切？ BPE 算法到底在合并什么？用一百来行纯 Python 亲手实现； 字节级 BPE 如何做到”任何文字都能编码”； 词表大小如何影响参数量、上下文和账单； 实际开发中最容易踩的 token 坑。  这是「大模型基础」系列的第二篇。第一篇我们手撕了迷你 GPT，知道了模型在”预测下一个 token”；这一篇回答一个更前置的问题：token 到底是什么？   一、先看三个真实场景1.1...</div></div></div></a><a class="pagination-related" href="/2026/10/30/llm-training-pipeline/" title="大模型是怎么炼成的：预训练、SFT 与对齐"><div class="cover" style="background: var(--default-bg-color)"></div><div class="info text-center"><div class="info-1"><div class="info-item-1"><i class="far fa-calendar-alt fa-fw"></i> 2026-10-30</div><div class="info-item-2">大模型是怎么炼成的：预训练、SFT 与对齐</div></div><div class="info-2"><div class="info-item-1">写在前面你下载了一个开源大模型，兴冲冲地输入”你好，请介绍一下你自己”，结果它回： 1你好，请介绍一下你自己的名字、年龄、职业、兴趣爱好……  它不是在回答你，而是在续写你的问题。这就是基座模型（base model）——一个只会”接话”的文本续写器。 而 ChatGPT、DeepSeek、Claude 这些产品里的模型，会礼貌地回答你、拒绝有害请求、按格式输出 JSON。它们和基座模型之间，隔着三道关键工序：  预训练（Pre-training）：读遍海量文本，学会”下一个 token 是什么”； 监督微调（SFT）：学会”按照指令回答”，而不是自顾自续写； 偏好对齐（RLHF &#x2F; DPO）：学会”什么样的回答更好”，更符合人类偏好。  这三步加起来，才是我们日常使用的”助手”。这一篇把整条流水线拆开，回答：  预训练到底在学什么？为什么”预测下一个词”能产生智能？ SFT 的数据长什么样？为什么只对回答部分算 loss？ RLHF 和 DPO 有什么区别？为什么需要”奖励模型”？ 推理模型（o1、R1 这一类）又多加了一步什么？  这是「大模型基础」系列的第四篇。前...</div></div></div></a><a class="pagination-related" href="/2026/10/23/mini-gpt-from-scratch/" title="手撕迷你 GPT（逐行代码）：从&quot;预测下一个字&quot;到会写句子"><div class="cover" style="background: var(--default-bg-color)"></div><div class="info text-center"><div class="info-1"><div class="info-item-1"><i class="far fa-calendar-alt fa-fw"></i> 2026-10-23</div><div class="info-item-2">手撕迷你 GPT（逐行代码）：从&quot;预测下一个字&quot;到会写句子</div></div><div class="info-2"><div class="info-item-1">写在前面上一篇《手撕 Transformer》的结尾，我留了一句话：  进阶挑战：把 Encoder 去掉，只用 Decoder 实现一个迷你 GPT。  这一篇就来还债。 我们要从零写出一个 0.87M 参数的字符级 GPT：4 层、128 维、4 个注意力头、上下文 64 个字符。在一台普通 CPU 上训练 3 分钟，它就能写出这样的句子： 1234567春眠不觉晓，处处闻啼鸟。夜来风雨声，花落知多少。登鹳雀楼王之涣白日依山尽，黄河入海流。欲穷千里目，更上一层楼。  看起来很惊艳，对吧？ 但我要先剧透：它不是在写诗，它是在背诗。 训练 loss 降到 0.03，验证 loss 却高达 12.9——这是教科书级的过拟合。本文会把这个”翻车现场”完整展示给你，因为理解它为什么翻车，比看它写出诗更重要。 这一篇你会学到：  GPT 和上一篇的 Transformer 到底差在哪； “预测下一个字”如何变成训练信号； 因果自注意力、Pre-LN、残差、权重共享，每个零件为什么存在； 一个完整 GPT 的训练和生成代码； 为什么小数据上的”惊艳效果”往往是记忆，而不是智能。  完整可运...</div></div></div></a></div></div></div><div class="aside-content" id="aside-content"><div class="card-widget card-info text-center"><div class="avatar-img"><img src="/img/avatar.jpg" onerror="this.onerror=null;this.src='/img/friend_404.gif'" alt="avatar"/></div><div class="author-info-name">CHENHUI</div><div class="author-info-description">一个个人技术博客</div><div class="site-data"><a href="/archives/"><div class="headline">文章</div><div class="length-num">9</div></a><a href="/tags/"><div class="headline">标签</div><div class="length-num">27</div></a><a href="/categories/"><div class="headline">分类</div><div class="length-num">1</div></a></div><a id="card-info-btn" target="_blank" rel="noopener" href="https://github.com/CHENHUI05"><i class="fab fa-github"></i><span>Follow Me</span></a></div><div class="card-widget card-announcement"><div class="item-headline"><i class="fas fa-bullhorn fa-shake"></i><span>公告</span></div><div class="announcement_content">欢迎来到我的博客！</div></div><div class="sticky_layout"><div class="card-widget" id="card-toc"><div class="item-headline"><i class="fas fa-stream"></i><span>目录</span><span class="toc-percentage"></span></div><div class="toc-content"><ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%86%99%E5%9C%A8%E5%89%8D%E9%9D%A2"><span class="toc-text">写在前面</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E4%B8%80%E3%80%81%E5%B9%BB%E8%A7%89%E7%9A%84%E4%B8%A4%E7%A7%8D%E7%B1%BB%E5%9E%8B"><span class="toc-text">一、幻觉的两种类型</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#1-1-%E4%BA%8B%E5%AE%9E%E6%80%A7%E5%B9%BB%E8%A7%89%EF%BC%88Factuality-Hallucination%EF%BC%89"><span class="toc-text">1.1 事实性幻觉（Factuality Hallucination）</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#1-2-%E5%BF%A0%E5%AE%9E%E6%80%A7%E5%B9%BB%E8%A7%89%EF%BC%88Faithfulness-Hallucination%EF%BC%89"><span class="toc-text">1.2 忠实性幻觉（Faithfulness Hallucination）</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E4%BA%8C%E3%80%81%E4%B8%BA%E4%BB%80%E4%B9%88%E6%A8%A1%E5%9E%8B%E4%BC%9A%E2%80%9D%E7%BC%96%E2%80%9D"><span class="toc-text">二、为什么模型会”编”</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#2-1-%E8%AE%AD%E7%BB%83%E7%9B%AE%E6%A0%87%E9%87%8C%E6%B2%A1%E6%9C%89%E2%80%9D%E7%9C%9F%E2%80%9D%E8%BF%99%E4%B8%AA%E5%AD%97"><span class="toc-text">2.1 训练目标里没有”真”这个字</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#2-2-%E7%9F%A5%E8%AF%86%E6%98%AF%E5%8E%8B%E7%BC%A9%E7%9A%84%EF%BC%8C%E8%80%8C%E4%B8%94%E6%9C%89%E6%8D%9F"><span class="toc-text">2.2 知识是压缩的，而且有损</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#2-3-%E7%9F%A5%E8%AF%86%E6%88%AA%E6%AD%A2%E4%B8%8E%E2%80%9D%E4%B8%8D%E7%9F%A5%E9%81%93%E2%80%9D"><span class="toc-text">2.3 知识截止与”不知道”</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#2-4-%E4%B8%8A%E4%B8%8B%E6%96%87%E5%A4%AA%E9%95%BF%EF%BC%8C%E6%B3%A8%E6%84%8F%E5%8A%9B%E8%A2%AB%E7%A8%80%E9%87%8A"><span class="toc-text">2.4 上下文太长，注意力被稀释</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#2-5-%E8%A7%A3%E7%A0%81%E7%9A%84%E9%9A%8F%E6%9C%BA%E6%80%A7"><span class="toc-text">2.5 解码的随机性</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#2-6-%E5%AF%B9%E9%BD%90%E7%9A%84%E5%89%AF%E4%BD%9C%E7%94%A8%EF%BC%9A%E5%AE%81%E5%8F%AF%E7%BC%96%EF%BC%8C%E4%B8%8D%E5%8F%AF%E6%8B%92"><span class="toc-text">2.6 对齐的副作用：宁可编，不可拒</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#2-7-%E8%AE%AD%E7%BB%83%E6%95%B0%E6%8D%AE%E6%9C%AC%E8%BA%AB%E6%9C%89%E9%94%99"><span class="toc-text">2.7 训练数据本身有错</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E4%B8%89%E3%80%81%E5%B9%BB%E8%A7%89%E4%B8%8D%E6%98%AF%E7%BA%AF%E7%B2%B9%E7%9A%84-bug"><span class="toc-text">三、幻觉不是纯粹的 bug</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%9B%9B%E3%80%81%E7%BC%93%E8%A7%A3%E6%89%8B%E6%AE%B5%EF%BC%9A%E4%BB%8E%E6%8F%90%E7%A4%BA%E8%AF%8D%E5%88%B0%E8%AE%AD%E7%BB%83"><span class="toc-text">四、缓解手段：从提示词到训练</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#4-1-%E6%8F%90%E7%A4%BA%E8%AF%8D%EF%BC%9A%E5%85%88%E8%AE%A9%E6%A8%A1%E5%9E%8B%E2%80%9D%E6%9C%89%E6%8D%AE%E5%8F%AF%E4%BE%9D%E2%80%9D"><span class="toc-text">4.1 提示词：先让模型”有据可依”</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#4-2-%E5%B7%A5%E5%85%B7%EF%BC%9A%E8%AE%A9%E7%A1%AE%E5%AE%9A%E7%9A%84%E4%BA%8B%E4%BA%A4%E7%BB%99%E7%A1%AE%E5%AE%9A%E7%9A%84%E7%B3%BB%E7%BB%9F"><span class="toc-text">4.2 工具：让确定的事交给确定的系统</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#4-3-%E8%87%AA%E6%88%91%E4%B8%80%E8%87%B4%E6%80%A7%EF%BC%9A%E5%A4%9A%E9%97%AE%E5%87%A0%E9%81%8D"><span class="toc-text">4.3 自我一致性：多问几遍</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#4-4-%E8%AE%AD%E7%BB%83%EF%BC%9A%E8%AE%A9%E2%80%9D%E6%89%BF%E8%AE%A4%E4%B8%8D%E7%9F%A5%E9%81%93%E2%80%9D%E6%88%90%E4%B8%BA%E5%A5%BD%E8%A1%8C%E4%B8%BA"><span class="toc-text">4.4 训练：让”承认不知道”成为好行为</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E4%BA%94%E3%80%81RAG%EF%BC%9A%E7%BB%99%E6%A8%A1%E5%9E%8B%E6%8E%A5%E4%B8%80%E4%B8%AA%E2%80%9D%E5%BC%80%E5%8D%B7%E8%80%83%E8%AF%95%E2%80%9D"><span class="toc-text">五、RAG：给模型接一个”开卷考试”</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#5-1-%E5%AE%8C%E6%95%B4%E6%B5%81%E6%B0%B4%E7%BA%BF"><span class="toc-text">5.1 完整流水线</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#5-2-%E4%B8%BA%E4%BB%80%E4%B9%88-RAG-%E8%83%BD%E9%99%8D%E4%BD%8E%E5%B9%BB%E8%A7%89"><span class="toc-text">5.2 为什么 RAG 能降低幻觉</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%85%AD%E3%80%81%E6%89%8B%E6%92%95%E4%B8%80%E4%B8%AA%E8%BF%B7%E4%BD%A0-RAG"><span class="toc-text">六、手撕一个迷你 RAG</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#6-1-%E6%96%87%E6%A1%A3%E4%B8%8E%E5%88%86%E5%9D%97"><span class="toc-text">6.1 文档与分块</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#6-2-%E6%A3%80%E7%B4%A2%EF%BC%9ATF-IDF-%E4%BD%99%E5%BC%A6"><span class="toc-text">6.2 检索：TF-IDF + 余弦</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#6-3-%E7%BB%84%E8%A3%85-prompt"><span class="toc-text">6.3 组装 prompt</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#6-4-%E8%BF%99%E4%B8%AA%E7%8E%A9%E5%85%B7%E5%92%8C%E5%B7%A5%E4%B8%9A%E7%BA%A7-RAG-%E5%B7%AE%E5%9C%A8%E5%93%AA"><span class="toc-text">6.4 这个玩具和工业级 RAG 差在哪</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E4%B8%83%E3%80%81RAG-%E7%9A%84%E4%B8%83%E4%B8%AA%E5%9D%91"><span class="toc-text">七、RAG 的七个坑</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%9D%91-1%EF%BC%9A%E5%9D%97%E5%88%87%E5%BE%97%E5%A4%AA%E5%A4%A7%E6%88%96%E5%A4%AA%E5%B0%8F"><span class="toc-text">坑 1：块切得太大或太小</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%9D%91-2%EF%BC%9A%E5%8F%AA%E7%9C%8B%E5%85%B3%E9%94%AE%E8%AF%8D%EF%BC%8C%E4%B8%8D%E6%87%82%E8%AF%AD%E4%B9%89"><span class="toc-text">坑 2：只看关键词，不懂语义</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%9D%91-3%EF%BC%9A%E5%A4%9A%E8%B7%B3%E9%97%AE%E9%A2%98"><span class="toc-text">坑 3：多跳问题</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%9D%91-4%EF%BC%9A%E8%A1%A8%E6%A0%BC%E5%92%8C%E5%9B%BE%E7%89%87"><span class="toc-text">坑 4：表格和图片</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%9D%91-5%EF%BC%9A%E8%B5%84%E6%96%99%E5%86%B2%E7%AA%81%E4%B8%8E%E6%97%B6%E6%95%88"><span class="toc-text">坑 5：资料冲突与时效</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%9D%91-6%EF%BC%9A%E6%8A%8A%E4%B8%8D%E7%9B%B8%E5%85%B3%E7%9A%84%E5%86%85%E5%AE%B9%E4%B9%9F%E5%A1%9E%E8%BF%9B%E5%8E%BB"><span class="toc-text">坑 6：把不相关的内容也塞进去</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%9D%91-7%EF%BC%9A%E6%B2%A1%E6%9C%89%E8%AF%84%E4%BC%B0"><span class="toc-text">坑 7：没有评估</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%85%AB%E3%80%81%E6%80%8E%E4%B9%88%E8%AF%84%E4%BC%B0%E4%B8%80%E4%B8%AA-RAG-%E7%B3%BB%E7%BB%9F"><span class="toc-text">八、怎么评估一个 RAG 系统</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#8-1-%E6%A3%80%E7%B4%A2%E8%AF%84%E4%BC%B0"><span class="toc-text">8.1 检索评估</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#8-2-%E7%94%9F%E6%88%90%E8%AF%84%E4%BC%B0"><span class="toc-text">8.2 生成评估</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#8-3-%E5%BB%BA%E4%B8%80%E4%B8%AA-50-%E6%9D%A1%E7%9A%84%E5%B0%8F%E8%AF%84%E4%BC%B0%E9%9B%86"><span class="toc-text">8.3 建一个 50 条的小评估集</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#8-4-LLM-as-a-Judge-%E8%A6%81%E8%B0%A8%E6%85%8E"><span class="toc-text">8.4 LLM-as-a-Judge 要谨慎</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E4%B9%9D%E3%80%81RAG%E3%80%81%E5%BE%AE%E8%B0%83%E3%80%81%E9%95%BF%E4%B8%8A%E4%B8%8B%E6%96%87%EF%BC%9A%E6%80%8E%E4%B9%88%E9%80%89"><span class="toc-text">九、RAG、微调、长上下文：怎么选</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%8D%81%E3%80%81%E5%B8%B8%E8%A7%81%E7%96%91%E9%97%AE"><span class="toc-text">十、常见疑问</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%8D%81%E4%B8%80%E3%80%81%E6%80%BB%E7%BB%93"><span class="toc-text">十一、总结</span></a></li></ol></div></div><div class="card-widget card-recent-post"><div class="item-headline"><i class="fas fa-history"></i><span>最新文章</span></div><div class="aside-list"><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2026/11/02/llm-hallucination-rag/" title="大模型为什么会胡说八道：幻觉、知识截止与 RAG">大模型为什么会胡说八道：幻觉、知识截止与 RAG</a><time datetime="2026-11-02T13:00:00.000Z" title="发表于 2026-11-02 21:00:00">2026-11-02</time></div></div><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2026/11/01/context-window-kv-cache/" title="上下文窗口与 KV Cache：大模型的&quot;记忆&quot;为什么又贵又短">上下文窗口与 KV Cache：大模型的&quot;记忆&quot;为什么又贵又短</a><time datetime="2026-11-01T12:20:00.000Z" title="发表于 2026-11-01 20:20:00">2026-11-01</time></div></div><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2026/10/30/llm-training-pipeline/" title="大模型是怎么炼成的：预训练、SFT 与对齐">大模型是怎么炼成的：预训练、SFT 与对齐</a><time datetime="2026-10-30T13:10:00.000Z" title="发表于 2026-10-30 21:10:00">2026-10-30</time></div></div><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2026/10/28/llm-sampling-decoding/" title="温度、Top-k 与 Top-p：大模型是怎么&quot;挑词&quot;的">温度、Top-k 与 Top-p：大模型是怎么&quot;挑词&quot;的</a><time datetime="2026-10-28T12:40:00.000Z" title="发表于 2026-10-28 20:40:00">2026-10-28</time></div></div><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2026/10/26/tokenizer-bpe-explained/" title="大模型眼里的文字：手撕 Tokenizer 与 BPE 分词">大模型眼里的文字：手撕 Tokenizer 与 BPE 分词</a><time datetime="2026-10-26T13:00:00.000Z" title="发表于 2026-10-26 21:00:00">2026-10-26</time></div></div></div></div></div></div></main><footer id="footer"><div class="footer-other"><div class="footer-copyright"><span class="copyright">&copy;&nbsp;2025 - 2026 By CHENHUI</span></div></div></footer></div><div id="rightside"><div id="rightside-config-hide"><button id="readmode" type="button" title="阅读模式"><i class="fas fa-book-open"></i></button><button id="darkmode" type="button" title="日间和夜间模式切换"><i class="fas fa-adjust"></i></button><button id="hide-aside-btn" type="button" title="单栏和双栏切换"><i class="fas fa-arrows-alt-h"></i></button></div><div id="rightside-config-show"><button id="rightside-config" type="button" title="设置"><i class="fas fa-cog fa-spin"></i></button><button class="close" id="mobile-toc-button" type="button" title="目录"><i class="fas fa-list-ul"></i></button><button id="go-up" type="button" title="回到顶部"><span class="scroll-percent"></span><i class="fas fa-arrow-up"></i></button></div></div><div><script src="/js/utils.js?v=5.5.4"></script><script src="/js/main.js?v=5.5.4"></script><div class="js-pjax"><script>(() => {
+  const parseViewBox = viewBox => {
+    if (!viewBox) return null
+    const parts = viewBox.trim().split(/[\s,]+/).map(n => Number(n))
+    if (parts.length !== 4 || parts.some(n => Number.isNaN(n))) return null
+    return parts
+  }
+
+  const getSvgViewBox = svg => {
+    const attr = parseViewBox(svg.getAttribute('viewBox'))
+    if (attr) return attr
+
+    // Fallback: use bbox to build a viewBox
+    try {
+      const bbox = svg.getBBox()
+      if (bbox && bbox.width && bbox.height) return [bbox.x, bbox.y, bbox.width, bbox.height]
+    } catch (e) {
+      // getBBox may fail on some edge cases; ignore
+    }
+
+    const w = Number(svg.getAttribute('width')) || 0
+    const h = Number(svg.getAttribute('height')) || 0
+    if (w > 0 && h > 0) return [0, 0, w, h]
+    return [0, 0, 100, 100]
+  }
+
+  const setSvgViewBox = (svg, vb) => {
+    svg.setAttribute('viewBox', `${vb[0]} ${vb[1]} ${vb[2]} ${vb[3]}`)
+  }
+
+  const clamp = (v, min, max) => Math.max(min, Math.min(max, v))
+
+  const openSvgInNewTab = ({ source, initViewBox }) => {
+    const getClonedSvg = () => {
+      if (typeof source === 'string') {
+        const template = document.createElement('template')
+        template.innerHTML = source.trim()
+        const svg = template.content.querySelector('svg')
+        return svg ? svg.cloneNode(true) : null
+      }
+      if (source && typeof source.cloneNode === 'function') {
+        return source.cloneNode(true)
+      }
+      return null
+    }
+
+    const clone = getClonedSvg()
+    if (!clone) return
+    if (initViewBox && initViewBox.length === 4) {
+      clone.setAttribute('viewBox', initViewBox.join(' '))
+    }
+    if (!clone.getAttribute('xmlns')) clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+    if (!clone.getAttribute('xmlns:xlink') && clone.outerHTML.includes('xlink:')) {
+      clone.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink')
+    }
+    // inject background to match current theme
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark'
+    const bg = getComputedStyle(document.body).backgroundColor || (isDark ? '#1e1e1e' : '#ffffff')
+    if (!clone.style.background) clone.style.background = bg
+
+    const serializer = new XMLSerializer()
+    const svgSource = serializer.serializeToString(clone)
+    const htmlSource = `<!doctype html><html><head><meta charset="utf-8" />
+      <style>
+        html, body { width: 100%; height: 100%; margin: 0; display: flex; align-items: center; justify-content: center; background: ${bg}; }
+        svg { max-width: 100%; max-height: 100%; height: auto; width: auto; }
+      </style>
+      </head><body>${svgSource}</body></html>`
+    const blob = new Blob([htmlSource], { type: 'text/html;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    window.open(url, '_blank', 'noopener')
+    setTimeout(() => URL.revokeObjectURL(url), 30000)
+  }
+
+  const attachMermaidViewerButton = wrap => {
+    let btn = wrap.querySelector('.mermaid-open-btn')
+    if (!btn) {
+      btn = document.createElement('button')
+      btn.type = 'button'
+      btn.className = 'mermaid-open-btn'
+      wrap.appendChild(btn)
+    }
+
+    btn.innerHTML = '<i class="fa fa-search fa-fw" aria-hidden="true"></i>'
+
+    if (!btn.__mermaidViewerBound) {
+      btn.addEventListener('click', e => {
+        e.preventDefault()
+        e.stopPropagation()
+        const svg = wrap.__mermaidOriginalSvg || wrap.querySelector('svg')
+        if (!svg) return
+        const initViewBox = wrap.__mermaidInitViewBox
+        if (typeof svg === 'string') {
+          openSvgInNewTab({ source: svg, initViewBox })
+          return
+        }
+        openSvgInNewTab({ source: svg, initViewBox })
+      })
+      btn.__mermaidViewerBound = true
+    }
+  }
+
+  // Zoom around a point (px, py) in the SVG viewport (in viewBox coordinates)
+  const zoomAtPoint = (vb, factor, px, py) => {
+    const w = vb[2] * factor
+    const h = vb[3] * factor
+    const nx = px - (px - vb[0]) * factor
+    const ny = py - (py - vb[1]) * factor
+    return [nx, ny, w, h]
+  }
+
+  const initMermaidGestures = wrap => {
+    const svg = wrap.querySelector('svg')
+    if (!svg) return
+
+    // Ensure viewBox exists so gestures always work
+    const initVb = getSvgViewBox(svg)
+    wrap.__mermaidInitViewBox = initVb
+    wrap.__mermaidCurViewBox = initVb.slice()
+    setSvgViewBox(svg, initVb)
+
+    // Avoid binding multiple times on themeChange/pjax
+    if (wrap.__mermaidGestureBound) return
+    wrap.__mermaidGestureBound = true
+
+    // Helper: map client (viewport) coordinate -> viewBox coordinate
+    const clientToViewBox = (clientX, clientY) => {
+      const rect = svg.getBoundingClientRect()
+      const vb = wrap.__mermaidCurViewBox || getSvgViewBox(svg)
+      const x = vb[0] + (clientX - rect.left) * (vb[2] / rect.width)
+      const y = vb[1] + (clientY - rect.top) * (vb[3] / rect.height)
+      return { x, y, rect, vb }
+    }
+
+    const state = {
+      pointers: new Map(),
+      startVb: null,
+      startDist: 0,
+      startCenter: null
+    }
+
+    const clampVb = vb => {
+      const init = wrap.__mermaidInitViewBox || vb
+      const minW = init[2] * 0.1
+      const maxW = init[2] * 10
+      const minH = init[3] * 0.1
+      const maxH = init[3] * 10
+      vb[2] = clamp(vb[2], minW, maxW)
+      vb[3] = clamp(vb[3], minH, maxH)
+      return vb
+    }
+
+    const setCurVb = vb => {
+      vb = clampVb(vb)
+      wrap.__mermaidCurViewBox = vb
+      setSvgViewBox(svg, vb)
+    }
+
+    const onPointerDown = e => {
+      // Allow only primary button for mouse
+      if (e.pointerType === 'mouse' && e.button !== 0) return
+      svg.setPointerCapture(e.pointerId)
+      state.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
+
+      if (state.pointers.size === 1) {
+        state.startVb = (wrap.__mermaidCurViewBox || getSvgViewBox(svg)).slice()
+      } else if (state.pointers.size === 2) {
+        const pts = [...state.pointers.values()]
+        const dx = pts[0].x - pts[1].x
+        const dy = pts[0].y - pts[1].y
+        state.startDist = Math.hypot(dx, dy)
+        state.startVb = (wrap.__mermaidCurViewBox || getSvgViewBox(svg)).slice()
+        state.startCenter = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 }
+      }
+    }
+
+    const onPointerMove = e => {
+      if (!state.pointers.has(e.pointerId)) return
+      state.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
+
+      // Pan with 1 pointer
+      if (state.pointers.size === 1 && state.startVb) {
+        const p = [...state.pointers.values()][0]
+        const prev = { x: e.clientX - e.movementX, y: e.clientY - e.movementY }
+        // movementX/Y unreliable on touch, compute from stored last position
+        const last = wrap.__mermaidLastSinglePointer || p
+        const dxClient = p.x - last.x
+        const dyClient = p.y - last.y
+        wrap.__mermaidLastSinglePointer = p
+
+        const { rect } = clientToViewBox(p.x, p.y)
+        const vb = (wrap.__mermaidCurViewBox || getSvgViewBox(svg)).slice()
+        const dx = dxClient * (vb[2] / rect.width)
+        const dy = dyClient * (vb[3] / rect.height)
+        setCurVb([vb[0] - dx, vb[1] - dy, vb[2], vb[3]])
+        return
+      }
+
+      // Pinch zoom with 2 pointers
+      if (state.pointers.size === 2 && state.startVb && state.startDist > 0) {
+        const pts = [...state.pointers.values()]
+        const dx = pts[0].x - pts[1].x
+        const dy = pts[0].y - pts[1].y
+        const dist = Math.hypot(dx, dy)
+        if (!dist) return
+        const factor = state.startDist / dist // dist bigger => zoom in (viewBox smaller)
+
+        const cx = (pts[0].x + pts[1].x) / 2
+        const cy = (pts[0].y + pts[1].y) / 2
+        const centerClient = { x: cx, y: cy }
+
+        const pxy = clientToViewBox(centerClient.x, centerClient.y)
+        const cpx = pxy.x
+        const cpy = pxy.y
+
+        const vb = zoomAtPoint(state.startVb, factor, cpx, cpy)
+        setCurVb(vb)
+      }
+    }
+
+    const onPointerUpOrCancel = e => {
+      state.pointers.delete(e.pointerId)
+      if (state.pointers.size === 0) {
+        state.startVb = null
+        state.startDist = 0
+        state.startCenter = null
+        wrap.__mermaidLastSinglePointer = null
+      } else if (state.pointers.size === 1) {
+        // reset single pointer baseline to avoid jump
+        wrap.__mermaidLastSinglePointer = [...state.pointers.values()][0]
+      }
+    }
+
+    // Wheel zoom (mouse/trackpad)
+    const onWheel = e => {
+      // ctrlKey on mac trackpad pinch; we treat both as zoom
+      e.preventDefault()
+      const delta = e.deltaY
+      const zoomFactor = delta > 0 ? 1.1 : 0.9
+      const { x, y } = clientToViewBox(e.clientX, e.clientY)
+      const vb = (wrap.__mermaidCurViewBox || getSvgViewBox(svg)).slice()
+      setCurVb(zoomAtPoint(vb, zoomFactor, x, y))
+    }
+
+    const onDblClick = () => {
+      const init = wrap.__mermaidInitViewBox
+      if (!init) return
+      wrap.__mermaidCurViewBox = init.slice()
+      setSvgViewBox(svg, init)
+    }
+
+    svg.addEventListener('pointerdown', onPointerDown)
+    svg.addEventListener('pointermove', onPointerMove)
+    svg.addEventListener('pointerup', onPointerUpOrCancel)
+    svg.addEventListener('pointercancel', onPointerUpOrCancel)
+    svg.addEventListener('wheel', onWheel, { passive: false })
+    svg.addEventListener('dblclick', onDblClick)
+  }
+
+  const runMermaid = ele => {
+    window.loadMermaid = true
+    const theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'default'
+
+    ele.forEach((item, index) => {
+      const mermaidSrc = item.firstElementChild
+
+      // Clear old render (themeChange/pjax will rerun)
+      const oldSvg = item.querySelector('svg')
+      if (oldSvg) oldSvg.remove()
+      item.__mermaidGestureBound = false
+
+      const config = mermaidSrc.dataset.config ? JSON.parse(mermaidSrc.dataset.config) : {}
+      if (!config.theme) {
+        config.theme = theme
+      }
+      const mermaidThemeConfig = `%%{init: ${JSON.stringify(config)}}%%\n`
+      const mermaidID = `mermaid-${index}`
+      const mermaidDefinition = mermaidThemeConfig + mermaidSrc.textContent
+
+      const renderFn = mermaid.render(mermaidID, mermaidDefinition)
+      const renderMermaid = svg => {
+        mermaidSrc.insertAdjacentHTML('afterend', svg)
+        if (true) initMermaidGestures(item)
+        item.__mermaidOriginalSvg = svg
+        if (true) attachMermaidViewerButton(item)
+      }
+
+
+      // mermaid v9 and v10 compatibility
+      typeof renderFn === 'string' ? renderMermaid(renderFn) : renderFn.then(({ svg }) => renderMermaid(svg))
+    })
+  }
+
+  const codeToMermaid = () => {
+    const codeMermaidEle = document.querySelectorAll('pre > code.mermaid')
+    if (codeMermaidEle.length === 0) return
+
+    codeMermaidEle.forEach(ele => {
+      const preEle = document.createElement('pre')
+      preEle.className = 'mermaid-src'
+      preEle.hidden = true
+      preEle.textContent = ele.textContent
+      const newEle = document.createElement('div')
+      newEle.className = 'mermaid-wrap'
+      newEle.appendChild(preEle)
+      ele.parentNode.replaceWith(newEle)
+    })
+  }
+
+  const loadMermaid = () => {
+    if (true) codeToMermaid()
+    const $mermaid = document.querySelectorAll('#article-container .mermaid-wrap')
+    if ($mermaid.length === 0) return
+
+    const runMermaidFn = () => runMermaid($mermaid)
+    btf.addGlobalFn('themeChange', runMermaidFn, 'mermaid')
+    window.loadMermaid ? runMermaidFn() : btf.getScript('https://cdn.jsdelivr.net/npm/mermaid@11.12.2/dist/mermaid.min.js').then(runMermaidFn)
+  }
+
+  btf.addGlobalFn('encrypt', loadMermaid, 'mermaid')
+  window.pjax ? loadMermaid() : document.addEventListener('DOMContentLoaded', loadMermaid)
+})()</script></div><script async data-pjax src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script></div></body></html>

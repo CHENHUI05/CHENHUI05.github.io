@@ -1,0 +1,779 @@
+<!DOCTYPE html><html lang="zh-CN" data-theme="light"><head><meta charset="UTF-8"><meta http-equiv="X-UA-Compatible" content="IE=edge"><meta name="viewport" content="width=device-width, initial-scale=1.0,viewport-fit=cover"><title>温度、Top-k 与 Top-p：大模型是怎么&quot;挑词&quot;的 | CHENHUI的博客</title><meta name="author" content="CHENHUI"><meta name="copyright" content="CHENHUI"><meta name="format-detection" content="telephone=no"><meta name="theme-color" content="#ffffff"><meta name="description" content="同一个问题，为什么每次回答都不一样？从 logits 到概率分布，用真实数字和纯 Python 实验讲透贪心解码、温度、Top-k、Top-p、重复惩罚与约束解码，附各任务的参数建议。">
+<meta property="og:type" content="article">
+<meta property="og:title" content="温度、Top-k 与 Top-p：大模型是怎么&quot;挑词&quot;的">
+<meta property="og:url" content="https://chenhui05.github.io/2026/10/28/llm-sampling-decoding/index.html">
+<meta property="og:site_name" content="CHENHUI的博客">
+<meta property="og:description" content="同一个问题，为什么每次回答都不一样？从 logits 到概率分布，用真实数字和纯 Python 实验讲透贪心解码、温度、Top-k、Top-p、重复惩罚与约束解码，附各任务的参数建议。">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:image" content="https://chenhui05.github.io/img/avatar.jpg">
+<meta property="article:published_time" content="2026-10-28T12:40:00.000Z">
+<meta property="article:modified_time" content="2026-11-02T14:16:36.118Z">
+<meta property="article:author" content="CHENHUI">
+<meta property="article:tag" content="Temperature">
+<meta property="article:tag" content="Top-p">
+<meta property="article:tag" content="大模型">
+<meta property="article:tag" content="大模型基础">
+<meta property="article:tag" content="采样">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="https://chenhui05.github.io/img/avatar.jpg"><script type="application/ld+json">{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "温度、Top-k 与 Top-p：大模型是怎么\"挑词\"的",
+  "url": "https://chenhui05.github.io/2026/10/28/llm-sampling-decoding/",
+  "image": "https://chenhui05.github.io/img/avatar.jpg",
+  "datePublished": "2026-10-28T12:40:00.000Z",
+  "dateModified": "2026-11-02T14:16:36.118Z",
+  "author": [
+    {
+      "@type": "Person",
+      "name": "CHENHUI",
+      "url": "https://chenhui05.github.io"
+    }
+  ]
+}</script><link rel="shortcut icon" href="/img/favicon.png"><link rel="canonical" href="https://chenhui05.github.io/2026/10/28/llm-sampling-decoding/index.html"><link rel="preconnect" href="//cdn.jsdelivr.net"/><link rel="preconnect" href="//busuanzi.ibruce.info"/><link rel="stylesheet" href="/css/index.css?v=5.5.4"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@7.1.0/css/all.min.css"><script>
+    (() => {
+      
+    const saveToLocal = {
+      set: (key, value, ttl) => {
+        if (!ttl) return
+        const expiry = Date.now() + ttl * 86400000
+        localStorage.setItem(key, JSON.stringify({ value, expiry }))
+      },
+      get: key => {
+        const itemStr = localStorage.getItem(key)
+        if (!itemStr) return undefined
+        const { value, expiry } = JSON.parse(itemStr)
+        if (Date.now() > expiry) {
+          localStorage.removeItem(key)
+          return undefined
+        }
+        return value
+      }
+    }
+
+    window.btf = {
+      saveToLocal,
+      getScript: (url, attr = {}) => new Promise((resolve, reject) => {
+        const script = document.createElement('script')
+        script.src = url
+        script.async = true
+        Object.entries(attr).forEach(([key, val]) => script.setAttribute(key, val))
+        script.onload = script.onreadystatechange = () => {
+          if (!script.readyState || /loaded|complete/.test(script.readyState)) resolve()
+        }
+        script.onerror = reject
+        document.head.appendChild(script)
+      }),
+      getCSS: (url, id) => new Promise((resolve, reject) => {
+        const link = document.createElement('link')
+        link.rel = 'stylesheet'
+        link.href = url
+        if (id) link.id = id
+        link.onload = link.onreadystatechange = () => {
+          if (!link.readyState || /loaded|complete/.test(link.readyState)) resolve()
+        }
+        link.onerror = reject
+        document.head.appendChild(link)
+      }),
+      addGlobalFn: (key, fn, name = false, parent = window) => {
+        if (!false && key.startsWith('pjax')) return
+        const globalFn = parent.globalFn || {}
+        globalFn[key] = globalFn[key] || {}
+        globalFn[key][name || Object.keys(globalFn[key]).length] = fn
+        parent.globalFn = globalFn
+      }
+    }
+  
+      
+      const activateDarkMode = () => {
+        document.documentElement.setAttribute('data-theme', 'dark')
+        if (document.querySelector('meta[name="theme-color"]') !== null) {
+          document.querySelector('meta[name="theme-color"]').setAttribute('content', '#0d0d0d')
+        }
+      }
+      const activateLightMode = () => {
+        document.documentElement.setAttribute('data-theme', 'light')
+        if (document.querySelector('meta[name="theme-color"]') !== null) {
+          document.querySelector('meta[name="theme-color"]').setAttribute('content', '#ffffff')
+        }
+      }
+
+      btf.activateDarkMode = activateDarkMode
+      btf.activateLightMode = activateLightMode
+
+      const theme = saveToLocal.get('theme')
+    
+          theme === 'dark' ? activateDarkMode() : theme === 'light' ? activateLightMode() : null
+        
+      
+      const asideStatus = saveToLocal.get('aside-status')
+      if (asideStatus !== undefined) {
+        document.documentElement.classList.toggle('hide-aside', asideStatus === 'hide')
+      }
+    
+      
+    const detectApple = () => {
+      if (/iPad|iPhone|iPod|Macintosh/.test(navigator.userAgent)) {
+        document.documentElement.classList.add('apple')
+      }
+    }
+    detectApple()
+  
+    })()
+  </script><script>const GLOBAL_CONFIG = {
+  root: '/',
+  algolia: undefined,
+  localSearch: undefined,
+  translate: undefined,
+  highlight: {"plugin":"highlight.js","highlightCopy":true,"highlightLang":true,"highlightHeightLimit":false,"highlightFullpage":false,"highlightMacStyle":false},
+  copy: {
+    success: '复制成功',
+    error: '复制失败',
+    noSupport: '浏览器不支持'
+  },
+  relativeDate: {
+    homepage: false,
+    post: false
+  },
+  runtime: '',
+  dateSuffix: {
+    just: '刚刚',
+    min: '分钟前',
+    hour: '小时前',
+    day: '天前',
+    month: '个月前'
+  },
+  copyright: undefined,
+  lightbox: 'null',
+  Snackbar: undefined,
+  infinitegrid: {
+    js: 'https://cdn.jsdelivr.net/npm/@egjs/infinitegrid@4.13.0/dist/infinitegrid.min.js',
+    buttonText: '加载更多'
+  },
+  isPhotoFigcaption: false,
+  islazyloadPlugin: false,
+  isAnchor: false,
+  percent: {
+    toc: true,
+    rightside: false,
+  },
+  autoDarkmode: false
+}</script><script id="config-diff">var GLOBAL_CONFIG_SITE = {
+  title: '温度、Top-k 与 Top-p：大模型是怎么"挑词"的',
+  isHighlightShrink: false,
+  isToc: true,
+  pageType: 'post'
+}</script><meta name="generator" content="Hexo 8.1.2"></head><body><div id="sidebar"><div id="menu-mask"></div><div id="sidebar-menus"><div class="avatar-img text-center"><img src="/img/avatar.jpg" onerror="this.onerror=null;this.src='/img/friend_404.gif'" alt="avatar"/></div><div class="site-data text-center"><a href="/archives/"><div class="headline">文章</div><div class="length-num">9</div></a><a href="/tags/"><div class="headline">标签</div><div class="length-num">27</div></a><a href="/categories/"><div class="headline">分类</div><div class="length-num">1</div></a></div><div class="menus_items"><div class="menus_item"><a class="site-page" href="/"><i class="fa-fw fas fa-home"></i><span> 首页</span></a></div><div class="menus_item"><a class="site-page" href="/archives/"><i class="fa-fw fas fa-archive"></i><span> 归档</span></a></div><div class="menus_item"><a class="site-page" href="/tags/"><i class="fa-fw fas fa-tags"></i><span> 标签</span></a></div><div class="menus_item"><a class="site-page" href="/categories/"><i class="fa-fw fas fa-folder-open"></i><span> 分类</span></a></div><div class="menus_item"><a class="site-page" href="/about/"><i class="fa-fw fas fa-heart"></i><span> 关于</span></a></div></div></div></div><div class="post" id="body-wrap"><header class="post-bg" id="page-header"><nav id="nav"><span id="blog-info"><a class="nav-site-title" href="/"><span class="site-name">CHENHUI的博客</span></a><a class="nav-page-title" href="/"><span class="site-name">温度、Top-k 与 Top-p：大模型是怎么&quot;挑词&quot;的</span><span class="site-name"><i class="fa-solid fa-circle-arrow-left"></i><span>  返回首页</span></span></a></span><div id="menus"><div class="menus_items"><div class="menus_item"><a class="site-page" href="/"><i class="fa-fw fas fa-home"></i><span> 首页</span></a></div><div class="menus_item"><a class="site-page" href="/archives/"><i class="fa-fw fas fa-archive"></i><span> 归档</span></a></div><div class="menus_item"><a class="site-page" href="/tags/"><i class="fa-fw fas fa-tags"></i><span> 标签</span></a></div><div class="menus_item"><a class="site-page" href="/categories/"><i class="fa-fw fas fa-folder-open"></i><span> 分类</span></a></div><div class="menus_item"><a class="site-page" href="/about/"><i class="fa-fw fas fa-heart"></i><span> 关于</span></a></div></div><div id="toggle-menu"><span class="site-page"><i class="fas fa-bars fa-fw"></i></span></div></div></nav><div id="post-info"><h1 class="post-title">温度、Top-k 与 Top-p：大模型是怎么&quot;挑词&quot;的</h1><div id="post-meta"><div class="meta-firstline"><span class="post-meta-date"><i class="far fa-calendar-alt fa-fw post-meta-icon"></i><span class="post-meta-label">发表于</span><time class="post-meta-date-created" datetime="2026-10-28T12:40:00.000Z" title="发表于 2026-10-28 20:40:00">2026-10-28</time><span class="post-meta-separator">|</span><i class="fas fa-history fa-fw post-meta-icon"></i><span class="post-meta-label">更新于</span><time class="post-meta-date-updated" datetime="2026-11-02T14:16:36.118Z" title="更新于 2026-11-02 22:16:36">2026-11-02</time></span><span class="post-meta-categories"><span class="post-meta-separator">|</span><i class="fas fa-inbox fa-fw post-meta-icon"></i><a class="post-meta-categories" href="/categories/%E4%BA%BA%E5%B7%A5%E6%99%BA%E8%83%BD/">人工智能</a></span></div><div class="meta-secondline"><span class="post-meta-separator">|</span><span class="post-meta-pv-cv" id="" data-flag-title=""><i class="far fa-eye fa-fw post-meta-icon"></i><span class="post-meta-label">浏览量:</span><span id="busuanzi_value_page_pv"><i class="fa-solid fa-spinner fa-spin"></i></span></span></div></div></div></header><main class="layout" id="content-inner"><div id="post"><article class="container post-content" id="article-container"><h2 id="写在前面"><a href="#写在前面" class="headerlink" title="写在前面"></a>写在前面</h2><p>你有没有遇到过这种情况：</p>
+<ul>
+<li>同一个问题问两遍，一次答得中规中矩，一次脑洞大开；</li>
+<li>把 <code>temperature</code> 从 0.7 调到 1.2，模型突然开始胡言乱语；</li>
+<li>明明设了 <code>temperature=0</code>，两次调用结果还是有细微差别；</li>
+<li>写代码时希望它稳定，写文案时希望它活泼，却不知道参数该怎么配。</li>
+</ul>
+<p>这些都不是玄学，而是**解码策略（decoding strategy）**在起作用。</p>
+<p>大模型每生成一个 token，输出的不是一个确定的词，而是<strong>整个词表上的一个概率分布</strong>。从”分布”到”最终选哪个词”，中间那一步就是采样。温度、Top-k、Top-p 都是在对这个分布做手术。</p>
+<p>这一篇我们把手术刀拆开：</p>
+<ul>
+<li>logits 和 softmax 到底算出了什么；</li>
+<li>贪心、温度、Top-k、Top-p 分别在改什么；</li>
+<li>用真实数字看温度如何把分布”压尖”或”摊平”；</li>
+<li>用 30 行纯 Python 写一个二元语言模型，亲眼看到”保守”和”发疯”的差别；</li>
+<li>不同任务到底该怎么配参数。</li>
+</ul>
+<p>这是「大模型基础」系列的第三篇。前两篇分别手撕了迷你 GPT 和 Tokenizer，这一篇接着讲：<strong>模型吐出概率之后，发生了什么。</strong></p>
+<span id="more"></span>
+
+<h2 id="一、模型输出的不是字，是分布"><a href="#一、模型输出的不是字，是分布" class="headerlink" title="一、模型输出的不是字，是分布"></a>一、模型输出的不是字，是分布</h2><h3 id="1-1-从-logits-到概率"><a href="#1-1-从-logits-到概率" class="headerlink" title="1.1 从 logits 到概率"></a>1.1 从 logits 到概率</h3><p>假设词表里只有 6 个候选词，模型在某一步给出的 <strong>logits</strong>（未归一化的打分）是：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">好: 3.0   很: 2.0   不: 1.5   太: 0.5   棒: 0.0   差: -0.5</span><br></pre></td></tr></table></figure>
+
+<p>logits 可以是任意实数，不是概率，加起来也不等于 1。要变成概率，过一遍 <strong>softmax</strong>：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">p_i = exp(z_i) / Σ_j exp(z_j)</span><br></pre></td></tr></table></figure>
+
+<p>算出来是：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">好: 0.570   很: 0.210   不: 0.127   太: 0.047   棒: 0.028   差: 0.017</span><br></pre></td></tr></table></figure>
+
+<p>意思是：模型认为下一个词是”好”的概率约 57%，”很”约 21%，以此类推。<strong>注意，模型给出的是”可能性”，不是”决定”。</strong> 最终选哪个，取决于解码策略。</p>
+<h3 id="1-2-为什么同一个问题每次答案不同"><a href="#1-2-为什么同一个问题每次答案不同" class="headerlink" title="1.2 为什么同一个问题每次答案不同"></a>1.2 为什么同一个问题每次答案不同</h3><p>因为绝大多数对话模型默认<strong>随机采样</strong>：按概率抽签，抽到”好”就输出”好”，抽到”很”就输出”很”。</p>
+<p>第一次抽到”好”，后面的话就往”好”的方向走；第二次抽到”很”，整句话的走向就变了。语言是链式反应，前面一个词不同，后面可能完全不同——这就是”同一个问题，两次回答不一样”的根源。</p>
+<p>如果每次都选概率最高的词（贪心），输出就固定了，但会变得机械、重复。<strong>随机性不是 bug，而是让模型”有创造力”的来源；关键是怎么控制它。</strong></p>
+<h2 id="二、贪心解码：永远选第一名"><a href="#二、贪心解码：永远选第一名" class="headerlink" title="二、贪心解码：永远选第一名"></a>二、贪心解码：永远选第一名</h2><p>最简单的方式：每步都选概率最高的 token。</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">下一个词 = argmax(p)</span><br></pre></td></tr></table></figure>
+
+<p>优点是稳定、可复现、适合有标准答案的任务（分类、抽取、代码补全）。缺点是：</p>
+<ol>
+<li><strong>容易重复</strong>：一旦进入”的的的的”或”我认为我认为”的循环，就很难出来；</li>
+<li><strong>容易平庸</strong>：每一步都选最安全的词，整体可能寡淡；</li>
+<li><strong>不等于全局最优</strong>：贪心是局部最优，每一步都选最好的，合起来不一定是最好的句子。</li>
+</ol>
+<p>用一个二元模型（只看前一个字预测下一个字）做实验，贪心生成的结果是：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">春眠不觉晓，疑是地上霜。</span><br></pre></td></tr></table></figure>
+
+<p>前半句来自《春晓》，后半句却跳到了《静夜思》。每一步都选了最高概率，但连起来语义已经断裂。真实大模型比二元模型强得多，但”局部最优不等于全局最优”的道理是一样的。</p>
+<h2 id="三、温度：把分布压尖或摊平"><a href="#三、温度：把分布压尖或摊平" class="headerlink" title="三、温度：把分布压尖或摊平"></a>三、温度：把分布压尖或摊平</h2><h3 id="3-1-公式"><a href="#3-1-公式" class="headerlink" title="3.1 公式"></a>3.1 公式</h3><p>温度（Temperature，<code>T</code>）是加在 softmax 里的一个除数：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">p_i = exp(z_i / T) / Σ_j exp(z_j / T)</span><br></pre></td></tr></table></figure>
+
+<ul>
+<li><code>T = 1</code>：原始分布；</li>
+<li><code>T &lt; 1</code>：logits 被放大，概率差距拉大，分布变<strong>尖</strong>，模型更保守；</li>
+<li><code>T &gt; 1</code>：logits 被缩小，概率差距变小，分布变<strong>平</strong>，模型更随机；</li>
+<li><code>T → 0</code>：等价于贪心，只选概率最高的那个。</li>
+</ul>
+<h3 id="3-2-真实数字"><a href="#3-2-真实数字" class="headerlink" title="3.2 真实数字"></a>3.2 真实数字</h3><p>还是上面那组 logits，换不同温度：</p>
+<table>
+<thead>
+<tr>
+<th>温度</th>
+<th>好</th>
+<th>很</th>
+<th>不</th>
+<th>太</th>
+<th>棒</th>
+<th>差</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>T&#x3D;0.3</td>
+<td>0.959</td>
+<td>0.034</td>
+<td>0.006</td>
+<td>0.000</td>
+<td>0.000</td>
+<td>0.000</td>
+</tr>
+<tr>
+<td>T&#x3D;1.0</td>
+<td>0.570</td>
+<td>0.210</td>
+<td>0.127</td>
+<td>0.047</td>
+<td>0.028</td>
+<td>0.017</td>
+</tr>
+<tr>
+<td>T&#x3D;2.0</td>
+<td>0.362</td>
+<td>0.220</td>
+<td>0.171</td>
+<td>0.104</td>
+<td>0.081</td>
+<td>0.063</td>
+</tr>
+</tbody></table>
+<p>看得很清楚：</p>
+<ul>
+<li><code>T=0.3</code> 时，”好”占了 95.9%，几乎等于每次都选它，输出高度确定；</li>
+<li><code>T=1.0</code> 时，前三个词还有竞争；</li>
+<li><code>T=2.0</code> 时，六个词的概率被拉得很接近，连”差”都有 6.3% 的机会，模型开始”语无伦次”。</li>
+</ul>
+<p><strong>温度不改变模型的知识，只改变它”冒险”的程度。</strong> 它不知道的答案，调温度也变不出来；它知道的答案，温度太低会反复说同一句，温度太高会说出似是而非的变体。</p>
+<h3 id="3-3-温度不是越高越聪明"><a href="#3-3-温度不是越高越聪明" class="headerlink" title="3.3 温度不是越高越聪明"></a>3.3 温度不是越高越聪明</h3><p>一个常见误解：温度高 &#x3D; 创造力强 &#x3D; 更聪明。不是的。</p>
+<ul>
+<li>温度高只是<strong>增加随机性</strong>，随机不等于有创意。它可能把”月亮”换成”月壳”，把”因为”换成”因伪”；</li>
+<li>温度低也不等于准确。贪心可能卡在重复循环里，反而更差。</li>
+</ul>
+<p>创造力来自模型学到的组合能力，温度只负责”要不要冒险尝试低概率的分支”。写诗可以调到 0.9<del>1.1，写代码最好 0</del>0.2。</p>
+<h2 id="四、Top-k：只在前-k-名里抽"><a href="#四、Top-k：只在前-k-名里抽" class="headerlink" title="四、Top-k：只在前 k 名里抽"></a>四、Top-k：只在前 k 名里抽</h2><p>温度调整的是整个分布的形状，但长尾里那些概率极低的词依然可能被抽到。<strong>Top-k</strong> 的做法简单粗暴：</p>
+<blockquote>
+<p>只保留概率最高的 k 个 token，其余全部丢掉，再把剩下的概率重新归一化。</p>
+</blockquote>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">候选 = 概率前 k 名</span><br><span class="line">p&#x27;_i = p_i / Σ_&#123;j∈候选&#125; p_j</span><br></pre></td></tr></table></figure>
+
+<p>比如上面的分布，<code>top-k=3</code> 之后：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">好: 0.629   很: 0.231   不: 0.140   其余: 0</span><br></pre></td></tr></table></figure>
+
+<p>这样无论温度多高，都不可能抽到”差”这种离谱的词。k 通常取 20~50，太小会限制表达，太大会让长尾重新混进来。</p>
+<p><strong>Top-k 的问题在于 k 是固定的</strong>：有的位置模型很确定（前 1 名 99%），有的位置模型很犹豫（前 10 名各占 10%）。固定 k 无法适应这种变化——确定的时候保留 50 个纯属浪费，犹豫的时候只留 50 个可能砍掉好选项。</p>
+<h2 id="五、Top-p：按累积概率动态截断"><a href="#五、Top-p：按累积概率动态截断" class="headerlink" title="五、Top-p：按累积概率动态截断"></a>五、Top-p：按累积概率动态截断</h2><p><strong>Top-p</strong>（也叫 nucleus sampling，核采样）解决了这个问题：</p>
+<blockquote>
+<p>从高到低累加概率，凑够 p 就停，只保留这一小撮 token。</p>
+</blockquote>
+<p>比如 <code>p=0.9</code>：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">好 0.570  -&gt; 累计 0.570</span><br><span class="line">很 0.210  -&gt; 累计 0.780</span><br><span class="line">不 0.127  -&gt; 累计 0.907  &gt;= 0.9，停</span><br></pre></td></tr></table></figure>
+
+<p>候选就是前三个，和 <code>top-k=3</code> 结果一样。但如果模型很确定（”好”占 0.95），top-p 只保留 1 个；如果模型很犹豫（前 20 个各占 0.05），top-p 会自动保留 20 个左右。</p>
+<p><strong>Top-p 的候选数量是动态的，跟着模型的置信度走</strong>，这比固定 k 更合理，所以现在大多数 API 推荐”调 top-p，而不是 top-k”。</p>
+<p>常见取值：<code>top-p = 0.9 ~ 0.95</code>。设成 1.0 等于不截断，长尾全部保留；设成 0.5 会非常保守。</p>
+<h3 id="5-1-Top-k-和-Top-p-一起用？"><a href="#5-1-Top-k-和-Top-p-一起用？" class="headerlink" title="5.1 Top-k 和 Top-p 一起用？"></a>5.1 Top-k 和 Top-p 一起用？</h3><p>可以，但通常没必要。两者叠加时，先 top-k 再 top-p（或反过来），候选集是两者的交集，容易过度限制。多数场景选一个调就行：</p>
+<ul>
+<li>想要”绝对不出现离谱词”：top-k；</li>
+<li>想要”根据置信度自适应”：top-p；</li>
+<li>两个都设：先 top-k 保底，再 top-p 截断，效果取更严格的那个。</li>
+</ul>
+<h3 id="5-2-新一点的选择：Min-p"><a href="#5-2-新一点的选择：Min-p" class="headerlink" title="5.2 新一点的选择：Min-p"></a>5.2 新一点的选择：Min-p</h3><p>Min-p 的思路是”相对阈值”：只保留概率不低于 <code>min_p × 最大概率</code> 的 token。</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">候选 = &#123; i | p_i &gt;= min_p * max(p) &#125;</span><br></pre></td></tr></table></figure>
+
+<p>比如 <code>min_p=0.05</code>、最大概率 0.6，则阈值是 0.03，所有概率 ≥ 3% 的词都保留。它同样能随置信度自适应，而且在高温下比 top-p 更稳。一些开源推理框架已经支持，API 里还不算常见，遇到时可以试试。</p>
+<h2 id="六、重复惩罚：别让模型复读"><a href="#六、重复惩罚：别让模型复读" class="headerlink" title="六、重复惩罚：别让模型复读"></a>六、重复惩罚：别让模型复读</h2><p>即使有温度，模型也可能陷入循环：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">我认为这个问题很重要，我认为这个问题很重要，我认为这个问题很重要……</span><br></pre></td></tr></table></figure>
+
+<p><strong>重复惩罚（repetition penalty）</strong> 在采样前修改 logits：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">如果 token 已经出现过：logit = logit / penalty   （penalty &gt; 1 时降低）</span><br></pre></td></tr></table></figure>
+
+<p><code>penalty</code> 通常取 1.0~1.3。设得太大，模型会刻意避开所有重复词，导致语句不通顺，甚至把”的”这种必需的功能词也压掉。</p>
+<p>另外两种惩罚：</p>
+<table>
+<thead>
+<tr>
+<th>参数</th>
+<th>作用</th>
+<th>典型值</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>frequency_penalty</code></td>
+<td>按出现次数线性扣分，越重复越压</td>
+<td>0 ~ 1</td>
+</tr>
+<tr>
+<td><code>presence_penalty</code></td>
+<td>出现过就扣一次分，鼓励聊新话题</td>
+<td>0 ~ 1</td>
+</tr>
+</tbody></table>
+<p>它们和 repetition penalty 的区别是：前者按”次数&#x2F;是否出现”扣分，后者按”比例”压 logit。做长文生成时，适度加一点 frequency penalty 能明显减少车轱辘话。</p>
+<h2 id="七、其他解码方式"><a href="#七、其他解码方式" class="headerlink" title="七、其他解码方式"></a>七、其他解码方式</h2><h3 id="7-1-Beam-Search（束搜索）"><a href="#7-1-Beam-Search（束搜索）" class="headerlink" title="7.1 Beam Search（束搜索）"></a>7.1 Beam Search（束搜索）</h3><p>保留 top-b 条候选路径，每一步扩展、打分、剪枝，最后选总分最高的一条。它适合<strong>翻译、摘要</strong>这种”输入输出比较确定”的任务，但不适合开放对话——beam search 倾向于生成安全、常见、无聊的句子。</p>
+<h3 id="7-2-约束解码（Constrained-Decoding）"><a href="#7-2-约束解码（Constrained-Decoding）" class="headerlink" title="7.2 约束解码（Constrained Decoding）"></a>7.2 约束解码（Constrained Decoding）</h3><p>如果你要模型输出 JSON，最可靠的办法不是”求它别写错”，而是<strong>在解码时禁止非法 token</strong>：用 JSON Schema 或语法自动机，把不符合语法的 token 概率置零。这叫 grammar-constrained decoding，vLLM、Outlines、llama.cpp 都支持。</p>
+<p>它能把”JSON 解析失败率”从百分之几降到接近零，是大模型落地工程里非常实用的一招。</p>
+<h3 id="7-3-Logit-Bias-与-Stop-Sequences"><a href="#7-3-Logit-Bias-与-Stop-Sequences" class="headerlink" title="7.3 Logit Bias 与 Stop Sequences"></a>7.3 Logit Bias 与 Stop Sequences</h3><ul>
+<li><strong>logit bias</strong>：给指定 token 加&#x2F;减固定分数，比如禁止出现某些词、强制以某个词开头；</li>
+<li><strong>stop sequences</strong>：生成到指定字符串就停，避免模型继续啰嗦；</li>
+<li><strong>seed</strong>：部分 API 支持固定随机种子，提高可复现性（但不保证跨版本、跨硬件完全一致）。</li>
+</ul>
+<h3 id="7-4-投机解码（Speculative-Decoding）"><a href="#7-4-投机解码（Speculative-Decoding）" class="headerlink" title="7.4 投机解码（Speculative Decoding）"></a>7.4 投机解码（Speculative Decoding）</h3><p>这不是改变”选什么词”，而是改变”算得多快”：用一个小模型快速草拟几个 token，大模型并行验证，接受就跳过。输出分布和大模型单独采样<strong>理论上一致</strong>，速度能提升 2~3 倍。它属于推理加速，不影响生成质量。</p>
+<h2 id="八、动手：一段代码看采样效果"><a href="#八、动手：一段代码看采样效果" class="headerlink" title="八、动手：一段代码看采样效果"></a>八、动手：一段代码看采样效果</h2><p>下面这个实验不依赖任何库。先用一个二元模型（只看前一个字）在几首唐诗上统计转移概率，再用不同的温度&#x2F;Top-k&#x2F;Top-p 生成，直观感受差别。</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">import</span> math, random</span><br><span class="line">random.seed(<span class="number">7</span>)</span><br><span class="line"></span><br><span class="line"><span class="keyword">def</span> <span class="title function_">softmax</span>(<span class="params">logits, T=<span class="number">1.0</span></span>):</span><br><span class="line">    z = [x / T <span class="keyword">for</span> x <span class="keyword">in</span> logits]</span><br><span class="line">    m = <span class="built_in">max</span>(z)</span><br><span class="line">    e = [math.exp(x - m) <span class="keyword">for</span> x <span class="keyword">in</span> z]</span><br><span class="line">    s = <span class="built_in">sum</span>(e)</span><br><span class="line">    <span class="keyword">return</span> [x / s <span class="keyword">for</span> x <span class="keyword">in</span> e]</span><br><span class="line"></span><br><span class="line"><span class="keyword">def</span> <span class="title function_">top_k_filter</span>(<span class="params">probs, k</span>):</span><br><span class="line">    order = <span class="built_in">sorted</span>(<span class="built_in">range</span>(<span class="built_in">len</span>(probs)), key=<span class="keyword">lambda</span> i: probs[i], reverse=<span class="literal">True</span>)[:k]</span><br><span class="line">    out = [<span class="number">0.0</span>] * <span class="built_in">len</span>(probs)</span><br><span class="line">    <span class="keyword">for</span> i <span class="keyword">in</span> order:</span><br><span class="line">        out[i] = probs[i]</span><br><span class="line">    <span class="keyword">return</span> [p / <span class="built_in">sum</span>(out) <span class="keyword">for</span> p <span class="keyword">in</span> out]</span><br><span class="line"></span><br><span class="line"><span class="keyword">def</span> <span class="title function_">top_p_filter</span>(<span class="params">probs, p</span>):</span><br><span class="line">    order = <span class="built_in">sorted</span>(<span class="built_in">range</span>(<span class="built_in">len</span>(probs)), key=<span class="keyword">lambda</span> i: probs[i], reverse=<span class="literal">True</span>)</span><br><span class="line">    out = [<span class="number">0.0</span>] * <span class="built_in">len</span>(probs)</span><br><span class="line">    cum = <span class="number">0.0</span></span><br><span class="line">    <span class="keyword">for</span> i <span class="keyword">in</span> order:</span><br><span class="line">        out[i] = probs[i]</span><br><span class="line">        cum += probs[i]</span><br><span class="line">        <span class="keyword">if</span> cum &gt;= p:</span><br><span class="line">            <span class="keyword">break</span></span><br><span class="line">    <span class="keyword">return</span> [x / <span class="built_in">sum</span>(out) <span class="keyword">for</span> x <span class="keyword">in</span> out]</span><br><span class="line"></span><br><span class="line"><span class="keyword">def</span> <span class="title function_">sample</span>(<span class="params">probs</span>):</span><br><span class="line">    r, cum = random.random(), <span class="number">0.0</span></span><br><span class="line">    <span class="keyword">for</span> i, p <span class="keyword">in</span> <span class="built_in">enumerate</span>(probs):</span><br><span class="line">        cum += p</span><br><span class="line">        <span class="keyword">if</span> r &lt; cum:</span><br><span class="line">            <span class="keyword">return</span> i</span><br><span class="line">    <span class="keyword">return</span> <span class="built_in">len</span>(probs) - <span class="number">1</span></span><br></pre></td></tr></table></figure>
+
+<p>统计转移表并生成：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br></pre></td><td class="code"><pre><span class="line">corpus = <span class="string">&quot;床前明月光，疑是地上霜。举头望明月，低头思故乡。春眠不觉晓，处处闻啼鸟。……&quot;</span></span><br><span class="line">next_counts = &#123;&#125;</span><br><span class="line"><span class="keyword">for</span> a, b <span class="keyword">in</span> <span class="built_in">zip</span>(corpus, corpus[<span class="number">1</span>:]):</span><br><span class="line">    next_counts.setdefault(a, &#123;&#125;)</span><br><span class="line">    next_counts[a][b] = next_counts[a].get(b, <span class="number">0</span>) + <span class="number">1</span></span><br><span class="line"></span><br><span class="line"><span class="keyword">def</span> <span class="title function_">generate</span>(<span class="params">start, length=<span class="number">40</span>, T=<span class="number">1.0</span>, k=<span class="literal">None</span>, p=<span class="literal">None</span>, greedy=<span class="literal">False</span></span>):</span><br><span class="line">    out, prev = [start], start</span><br><span class="line">    <span class="keyword">for</span> _ <span class="keyword">in</span> <span class="built_in">range</span>(length - <span class="number">1</span>):</span><br><span class="line">        items = next_counts.get(prev)</span><br><span class="line">        <span class="keyword">if</span> <span class="keyword">not</span> items:</span><br><span class="line">            <span class="keyword">break</span></span><br><span class="line">        chars = <span class="built_in">list</span>(items.keys())</span><br><span class="line">        probs = softmax([math.log(n / <span class="built_in">sum</span>(items.values())) <span class="keyword">for</span> n <span class="keyword">in</span> items.values()], T)</span><br><span class="line">        <span class="keyword">if</span> k: probs = top_k_filter(probs, k)</span><br><span class="line">        <span class="keyword">if</span> p: probs = top_p_filter(probs, p)</span><br><span class="line">        idx = <span class="built_in">max</span>(<span class="built_in">range</span>(<span class="built_in">len</span>(probs)), key=<span class="keyword">lambda</span> i: probs[i]) <span class="keyword">if</span> greedy <span class="keyword">else</span> sample(probs)</span><br><span class="line">        out.append(chars[idx])</span><br><span class="line">        prev = chars[idx]</span><br><span class="line">    <span class="keyword">return</span> <span class="string">&quot;&quot;</span>.join(out)</span><br></pre></td></tr></table></figure>
+
+<p>真实运行结果（摘录，每次运行会不同）：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line">贪心：</span><br><span class="line">  春眠不觉晓，疑是地上霜。</span><br><span class="line">T=0.3：</span><br><span class="line">  春眠不见人，更上一层楼。红豆生南国，独钓寒江雪。</span><br><span class="line">T=1.0：</span><br><span class="line">  春来风雨声，花落知盘中，粒粒皆辛苦。欲穷千山鸟飞绝，此山中，但闻人，粒皆辛苦。</span><br><span class="line">T=1.5：</span><br><span class="line">  春眠不觉晓，言师采撷，低头思。返景入海流。谁知多少。夜来风雨声，独钓寒江雪。举头</span><br><span class="line">T=1.0, top-k=5：</span><br><span class="line">  春来发几枝。千里目，疑是地上霜。春来发几枝。春来发几枝。</span><br></pre></td></tr></table></figure>
+
+<p>观察几个现象：</p>
+<ol>
+<li><strong>贪心</strong>直接走进了”春眠不觉晓 → 疑是地上霜”的混合，而且因为语料里有换行，它开始循环复读；</li>
+<li><strong>T&#x3D;0.3</strong> 还算通顺，但句子之间跳跃，像在拼贴；</li>
+<li><strong>T&#x3D;1.5</strong> 已经完全放飞，”言师采撷””返景入海流”语法崩了；</li>
+<li><strong>top-k&#x3D;5</strong> 虽然温度正常，但因为候选被压得太窄，反而更容易复读”春来发几枝”。</li>
+</ol>
+<p>这个二元模型当然不能代表大模型，但<strong>分布、采样、截断的机制是一模一样的</strong>。你在大模型 API 上看到的所有”性格差异”，底层都是这套操作。</p>
+<h2 id="九、参数怎么配：一张实用表"><a href="#九、参数怎么配：一张实用表" class="headerlink" title="九、参数怎么配：一张实用表"></a>九、参数怎么配：一张实用表</h2><table>
+<thead>
+<tr>
+<th>任务</th>
+<th>temperature</th>
+<th>top_p</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>代码生成 &#x2F; SQL</td>
+<td>0 ~ 0.2</td>
+<td>0.95</td>
+<td>要稳定、可复现</td>
+</tr>
+<tr>
+<td>数据抽取 &#x2F; 分类</td>
+<td>0</td>
+<td>1.0</td>
+<td>贪心最稳</td>
+</tr>
+<tr>
+<td>翻译 &#x2F; 摘要</td>
+<td>0.3 ~ 0.5</td>
+<td>0.9</td>
+<td>少量多样性，避免死板</td>
+</tr>
+<tr>
+<td>客服问答 &#x2F; RAG</td>
+<td>0.1 ~ 0.3</td>
+<td>0.9</td>
+<td>忠于资料，别发挥</td>
+</tr>
+<tr>
+<td>通用聊天</td>
+<td>0.7</td>
+<td>0.9</td>
+<td>平衡</td>
+</tr>
+<tr>
+<td>文案 &#x2F; 起名 &#x2F; 头脑风暴</td>
+<td>0.9 ~ 1.1</td>
+<td>0.95</td>
+<td>鼓励发散</td>
+</tr>
+<tr>
+<td>写诗 &#x2F; 小说</td>
+<td>1.0 ~ 1.2</td>
+<td>0.95</td>
+<td>可以更野一点</td>
+</tr>
+<tr>
+<td>数学 &#x2F; 推理</td>
+<td>0 ~ 0.3</td>
+<td>0.95</td>
+<td>降低随机性，配合多采样投票</td>
+</tr>
+</tbody></table>
+<p>几条经验：</p>
+<ul>
+<li><strong>先调 temperature，再调 top_p</strong>。温度是主旋钮，top-p 是保险丝；</li>
+<li><strong>不要同时把两个都调高</strong>。<code>T=1.5 + top_p=1.0</code> 是”发疯套餐”；</li>
+<li><strong>代码&#x2F;JSON 任务优先用约束解码</strong>，比调温度靠谱；</li>
+<li><strong>需要多样性时，采样多次再选</strong>（self-consistency），比一次高温生成更可控；</li>
+<li><strong>API 默认值通常就是 0.7 &#x2F; 0.9 左右</strong>，不知道用什么时先用默认。</li>
+</ul>
+<h2 id="十、常见误区"><a href="#十、常见误区" class="headerlink" title="十、常见误区"></a>十、常见误区</h2><p><strong>Q1：<code>temperature=0</code> 就一定完全确定吗？</strong><br>不保证。GPU 浮点运算的顺序、批处理中其他请求的影响、不同推理框架的实现，都可能带来微小差异。工程上把它当”近似确定”，别当”绝对可复现”。真要可复现，固定 seed、固定 batch、固定硬件和框架版本。</p>
+<p><strong>Q2：温度高是不是模型更聪明？</strong><br>不是。温度只改变采样随机性，不增加知识。高温会让模型更”敢说”，但不代表说得对。很多”高温更有创意”的体感，其实只是低概率词带来的新鲜感。</p>
+<p><strong>Q3：为什么我设了 top_p&#x3D;0.9，还是会出现奇怪的词？</strong><br>top-p 只截断概率质量，不判断语义。如果模型本身对某个错误答案给了 0.4 的概率，它依然会被抽到。<strong>采样策略解决不了知识错误</strong>，那是 RAG、工具调用和训练的问题。</p>
+<p><strong>Q4：温度和 top-k&#x2F;top-p 会改变模型”知道什么”吗？</strong><br>不会。它们只改变”从已知分布里怎么选”。模型的参数、知识、偏见都在采样之前就固定了。</p>
+<p><strong>Q5：为什么同一句话，API 和本地部署输出不一样？</strong><br>默认参数、tokenizer 版本、推理框架的采样实现、浮点精度都可能不同。对比实验时要固定模型版本、tokenizer、参数和 seed。</p>
+<h2 id="十一、总结"><a href="#十一、总结" class="headerlink" title="十一、总结"></a>十一、总结</h2><p>把这一篇压缩成一条链：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">输入 → 模型 → 每个位置的 logits（词表大小）</span><br><span class="line">     → softmax → 概率分布</span><br><span class="line">     → 温度（压尖/摊平）</span><br><span class="line">     → top-k / top-p（截断长尾）</span><br><span class="line">     → 重复惩罚（压制复读）</span><br><span class="line">     → 采样 → 选出一个 token</span><br><span class="line">     → 拼回输入，重复</span><br></pre></td></tr></table></figure>
+
+<p>记住四句话：</p>
+<ol>
+<li><strong>模型输出的是分布，不是决定</strong>；采样策略决定”怎么选”。</li>
+<li><strong>温度控制冒险程度</strong>：低温柔顺保守，高温发散随机。</li>
+<li><strong>Top-k 是固定名额，Top-p 是动态名额</strong>；后者更常用。</li>
+<li><strong>采样不能提升知识，只能改变表达</strong>；要事实准确，靠检索、工具和验证。</li>
+</ol>
+<p>动手建议：</p>
+<ol>
+<li>跑一遍第八节的代码，把 <code>T</code> 从 0.1 调到 2.0，观察文本从”复读”到”胡话”的连续变化；</li>
+<li>固定 <code>T=1.0</code>，分别试 <code>top-k=3/10/50</code> 和 <code>top-p=0.5/0.9/1.0</code>，感受截断强度；</li>
+<li>用真实 API 对同一个问题生成 10 次，统计答案的多样性，再换参数对比；</li>
+<li>找一个需要 JSON 输出的任务，试试约束解码，对比”求模型别写错”和”语法层强制”的成功率。</li>
+</ol>
+<p>下一篇我们聊<strong>训练</strong>：这样一个会预测下一个 token 的模型，是怎么从随机初始化变成”什么都懂”的？预训练、SFT、RLHF&#x2F;DPO 三个阶段各自在做什么，又为什么缺一不可。</p>
+<hr>
+<p><strong>本系列其他文章：</strong></p>
+<ul>
+<li><a href="/2026/10/23/mini-gpt-from-scratch/" title="手撕迷你 GPT（逐行代码）：从&quot;预测下一个字&quot;到会写句子">手撕迷你 GPT：从预测下一个字到会写句子</a></li>
+<li><a href="/2026/10/26/tokenizer-bpe-explained/" title="大模型眼里的文字：手撕 Tokenizer 与 BPE 分词">大模型眼里的文字：手撕 Tokenizer 与 BPE 分词</a></li>
+<li><a href="/2026/10/30/llm-training-pipeline/" title="大模型是怎么炼成的：预训练、SFT 与对齐">大模型是怎么炼成的：预训练、SFT 与对齐</a></li>
+<li><a href="/2026/11/01/context-window-kv-cache/" title="上下文窗口与 KV Cache：大模型的&quot;记忆&quot;为什么又贵又短">上下文窗口与 KV Cache：大模型的记忆为什么又贵又短</a></li>
+<li><a href="/2026/11/02/llm-hallucination-rag/" title="大模型为什么会胡说八道：幻觉、知识截止与 RAG">大模型为什么会胡说八道：幻觉与 RAG</a></li>
+</ul>
+</article><div class="post-copyright"><div class="post-copyright__author"><span class="post-copyright-meta"><i class="fas fa-circle-user fa-fw"></i>文章作者: </span><span class="post-copyright-info"><a href="https://chenhui05.github.io">CHENHUI</a></span></div><div class="post-copyright__type"><span class="post-copyright-meta"><i class="fas fa-square-arrow-up-right fa-fw"></i>文章链接: </span><span class="post-copyright-info"><a href="https://chenhui05.github.io/2026/10/28/llm-sampling-decoding/">https://chenhui05.github.io/2026/10/28/llm-sampling-decoding/</a></span></div><div class="post-copyright__notice"><span class="post-copyright-meta"><i class="fas fa-circle-exclamation fa-fw"></i>版权声明: </span><span class="post-copyright-info">本博客所有文章除特别声明外，均采用 <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/" target="_blank">CC BY-NC-SA 4.0</a> 许可协议。转载请注明来源 <a href="https://chenhui05.github.io" target="_blank">CHENHUI的博客</a>！</span></div></div><div class="tag_share"><div class="post-meta__tag-list"><a class="post-meta__tags" href="/tags/%E5%A4%A7%E6%A8%A1%E5%9E%8B%E5%9F%BA%E7%A1%80/">大模型基础</a><a class="post-meta__tags" href="/tags/%E5%A4%A7%E6%A8%A1%E5%9E%8B/">大模型</a><a class="post-meta__tags" href="/tags/%E9%87%87%E6%A0%B7/">采样</a><a class="post-meta__tags" href="/tags/Temperature/">Temperature</a><a class="post-meta__tags" href="/tags/Top-p/">Top-p</a></div><div class="post-share"><div class="social-share" data-image="/img/avatar.jpg" data-sites="facebook,x,wechat,weibo,qq"></div><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/butterfly-extsrc@1.1.6/sharejs/dist/css/share.min.css" media="print" onload="this.media='all'"><script src="https://cdn.jsdelivr.net/npm/butterfly-extsrc@1.1.6/sharejs/dist/js/social-share.min.js" defer></script></div></div><nav class="pagination-post" id="pagination"><a class="pagination-related" href="/2026/10/30/llm-training-pipeline/" title="大模型是怎么炼成的：预训练、SFT 与对齐"><div class="cover" style="background: var(--default-bg-color)"></div><div class="info"><div class="info-1"><div class="info-item-1">上一篇</div><div class="info-item-2">大模型是怎么炼成的：预训练、SFT 与对齐</div></div><div class="info-2"><div class="info-item-1">写在前面你下载了一个开源大模型，兴冲冲地输入”你好，请介绍一下你自己”，结果它回： 1你好，请介绍一下你自己的名字、年龄、职业、兴趣爱好……  它不是在回答你，而是在续写你的问题。这就是基座模型（base model）——一个只会”接话”的文本续写器。 而 ChatGPT、DeepSeek、Claude 这些产品里的模型，会礼貌地回答你、拒绝有害请求、按格式输出 JSON。它们和基座模型之间，隔着三道关键工序：  预训练（Pre-training）：读遍海量文本，学会”下一个 token 是什么”； 监督微调（SFT）：学会”按照指令回答”，而不是自顾自续写； 偏好对齐（RLHF &#x2F; DPO）：学会”什么样的回答更好”，更符合人类偏好。  这三步加起来，才是我们日常使用的”助手”。这一篇把整条流水线拆开，回答：  预训练到底在学什么？为什么”预测下一个词”能产生智能？ SFT 的数据长什么样？为什么只对回答部分算 loss？ RLHF 和 DPO 有什么区别？为什么需要”奖励模型”？ 推理模型（o1、R1 这一类）又多加了一步什么？  这是「大模型基础」系列的第四篇。前...</div></div></div></a><a class="pagination-related" href="/2026/10/26/tokenizer-bpe-explained/" title="大模型眼里的文字：手撕 Tokenizer 与 BPE 分词"><div class="cover" style="background: var(--default-bg-color)"></div><div class="info text-right"><div class="info-1"><div class="info-item-1">下一篇</div><div class="info-item-2">大模型眼里的文字：手撕 Tokenizer 与 BPE 分词</div></div><div class="info-2"><div class="info-item-1">写在前面你给大模型 API 付的钱，是按 token 算的，不是按字数，也不是按单词数。 同样一段意思，写成英文可能只要 20 个 token，写成中文可能要 35 个；同一个问题问两遍，第二次如果多了几个空格，token 数也可能变化。更诡异的是，很多人发现模型数不清 strawberry 里有几个 r——因为在它眼里，strawberry 根本不是由字母组成的，而是一两个整体编号。 这些现象背后是同一个东西：Tokenizer（分词器）。 它是大模型流水线的第一道工序，也是最多人忽略的一道。模型再聪明，也只能处理分词器递给它的那串整数。这一篇我们就把它拆开：  为什么不能直接按”字”或按”词”切？ BPE 算法到底在合并什么？用一百来行纯 Python 亲手实现； 字节级 BPE 如何做到”任何文字都能编码”； 词表大小如何影响参数量、上下文和账单； 实际开发中最容易踩的 token 坑。  这是「大模型基础」系列的第二篇。第一篇我们手撕了迷你 GPT，知道了模型在”预测下一个 token”；这一篇回答一个更前置的问题：token 到底是什么？   一、先看三个真实场景1.1...</div></div></div></a></nav><div class="relatedPosts"><div class="headline"><i class="fas fa-thumbs-up fa-fw"></i><span>相关推荐</span></div><div class="relatedPosts-list"><a class="pagination-related" href="/2026/11/01/context-window-kv-cache/" title="上下文窗口与 KV Cache：大模型的&quot;记忆&quot;为什么又贵又短"><div class="cover" style="background: var(--default-bg-color)"></div><div class="info text-center"><div class="info-1"><div class="info-item-1"><i class="far fa-calendar-alt fa-fw"></i> 2026-11-01</div><div class="info-item-2">上下文窗口与 KV Cache：大模型的&quot;记忆&quot;为什么又贵又短</div></div><div class="info-2"><div class="info-item-1">写在前面模型厂商的宣传页上，”128k 上下文””1M 超长上下文”的字样越来越常见。听起来像是：只要把整本书塞进去，模型就能全部记住、全部理解。 但真正用过的人会发现问题：  塞进去 10 万字，首 token 要等十几秒； 明明资料就在中间，模型却答”文中没有提到”； 开两个长对话，显卡显存就爆了； 同一个模型，8k 上下文很聪明，128k 上下文反而变笨。  这些现象指向大模型架构里两个绕不开的关键词：上下文窗口（context window） 和 KV Cache。 这一篇我们不讲虚的，直接从公式和真实数字出发，回答四个问题：  上下文窗口到底是什么，为什么不能无限大？ 为什么长上下文又慢又贵？钱花在哪了？ KV Cache 是什么，一个 token 到底占多少显存？ “长上下文”和”真记住”是一回事吗？什么时候该用 RAG？  这是「大模型基础」系列的第五篇。前面我们讲了 token、GPT 结构、采样和训练；这一篇讲推理阶段最现实的约束：显存和算力。   一、上下文窗口：模型的工作台，不是硬盘1.1 它到底是什么上下文窗口指的是：模型在一次请求中能处理的最大 toke...</div></div></div></a><a class="pagination-related" href="/2026/11/02/llm-hallucination-rag/" title="大模型为什么会胡说八道：幻觉、知识截止与 RAG"><div class="cover" style="background: var(--default-bg-color)"></div><div class="info text-center"><div class="info-1"><div class="info-item-1"><i class="far fa-calendar-alt fa-fw"></i> 2026-11-02</div><div class="info-item-2">大模型为什么会胡说八道：幻觉、知识截止与 RAG</div></div><div class="info-2"><div class="info-item-1">写在前面我见过最离谱的一次：让某模型推荐几篇”关于大模型幻觉”的论文，它一口气给了五篇，标题、作者、年份、期刊全都像模像样——但没有一篇真实存在。 更麻烦的是，它说得很自信。没有”可能””大概”，没有犹豫，甚至连引用格式都给你排好了。你如果不去查，根本发现不了。 这就是幻觉（Hallucination）：模型生成了流畅、自信、但不符合事实或没有依据的内容。 很多人把它当成”模型还不够强”的 bug，等下一代就好了。但这一篇想告诉你：  幻觉不是偶然的故障，而是”预测下一个 token”这个训练目标的结构性副产品。它不会消失，只能被管理。  我们会讲清楚：  幻觉分哪两种，各自怎么产生； 为什么模型”不知道自己不知道”； RAG 到底怎么接，为什么它不能包治百病； 用 100 行纯 Python 手撕一个迷你检索系统，跑通”检索—增强—生成”的骨架； 怎么评估一个 RAG 系统到底靠不靠谱。  这是「大模型基础」系列的第六篇，也是最后一篇。前面讲了模型怎么读字、怎么生成、怎么训练、记忆为什么贵；这一篇讲它最常被诟病的毛病，以及工程上的应对。   一、幻觉的两种类型学术界通常把幻觉分...</div></div></div></a><a class="pagination-related" href="/2026/10/30/llm-training-pipeline/" title="大模型是怎么炼成的：预训练、SFT 与对齐"><div class="cover" style="background: var(--default-bg-color)"></div><div class="info text-center"><div class="info-1"><div class="info-item-1"><i class="far fa-calendar-alt fa-fw"></i> 2026-10-30</div><div class="info-item-2">大模型是怎么炼成的：预训练、SFT 与对齐</div></div><div class="info-2"><div class="info-item-1">写在前面你下载了一个开源大模型，兴冲冲地输入”你好，请介绍一下你自己”，结果它回： 1你好，请介绍一下你自己的名字、年龄、职业、兴趣爱好……  它不是在回答你，而是在续写你的问题。这就是基座模型（base model）——一个只会”接话”的文本续写器。 而 ChatGPT、DeepSeek、Claude 这些产品里的模型，会礼貌地回答你、拒绝有害请求、按格式输出 JSON。它们和基座模型之间，隔着三道关键工序：  预训练（Pre-training）：读遍海量文本，学会”下一个 token 是什么”； 监督微调（SFT）：学会”按照指令回答”，而不是自顾自续写； 偏好对齐（RLHF &#x2F; DPO）：学会”什么样的回答更好”，更符合人类偏好。  这三步加起来，才是我们日常使用的”助手”。这一篇把整条流水线拆开，回答：  预训练到底在学什么？为什么”预测下一个词”能产生智能？ SFT 的数据长什么样？为什么只对回答部分算 loss？ RLHF 和 DPO 有什么区别？为什么需要”奖励模型”？ 推理模型（o1、R1 这一类）又多加了一步什么？  这是「大模型基础」系列的第四篇。前...</div></div></div></a><a class="pagination-related" href="/2026/10/26/tokenizer-bpe-explained/" title="大模型眼里的文字：手撕 Tokenizer 与 BPE 分词"><div class="cover" style="background: var(--default-bg-color)"></div><div class="info text-center"><div class="info-1"><div class="info-item-1"><i class="far fa-calendar-alt fa-fw"></i> 2026-10-26</div><div class="info-item-2">大模型眼里的文字：手撕 Tokenizer 与 BPE 分词</div></div><div class="info-2"><div class="info-item-1">写在前面你给大模型 API 付的钱，是按 token 算的，不是按字数，也不是按单词数。 同样一段意思，写成英文可能只要 20 个 token，写成中文可能要 35 个；同一个问题问两遍，第二次如果多了几个空格，token 数也可能变化。更诡异的是，很多人发现模型数不清 strawberry 里有几个 r——因为在它眼里，strawberry 根本不是由字母组成的，而是一两个整体编号。 这些现象背后是同一个东西：Tokenizer（分词器）。 它是大模型流水线的第一道工序，也是最多人忽略的一道。模型再聪明，也只能处理分词器递给它的那串整数。这一篇我们就把它拆开：  为什么不能直接按”字”或按”词”切？ BPE 算法到底在合并什么？用一百来行纯 Python 亲手实现； 字节级 BPE 如何做到”任何文字都能编码”； 词表大小如何影响参数量、上下文和账单； 实际开发中最容易踩的 token 坑。  这是「大模型基础」系列的第二篇。第一篇我们手撕了迷你 GPT，知道了模型在”预测下一个 token”；这一篇回答一个更前置的问题：token 到底是什么？   一、先看三个真实场景1.1...</div></div></div></a><a class="pagination-related" href="/2026/10/23/mini-gpt-from-scratch/" title="手撕迷你 GPT（逐行代码）：从&quot;预测下一个字&quot;到会写句子"><div class="cover" style="background: var(--default-bg-color)"></div><div class="info text-center"><div class="info-1"><div class="info-item-1"><i class="far fa-calendar-alt fa-fw"></i> 2026-10-23</div><div class="info-item-2">手撕迷你 GPT（逐行代码）：从&quot;预测下一个字&quot;到会写句子</div></div><div class="info-2"><div class="info-item-1">写在前面上一篇《手撕 Transformer》的结尾，我留了一句话：  进阶挑战：把 Encoder 去掉，只用 Decoder 实现一个迷你 GPT。  这一篇就来还债。 我们要从零写出一个 0.87M 参数的字符级 GPT：4 层、128 维、4 个注意力头、上下文 64 个字符。在一台普通 CPU 上训练 3 分钟，它就能写出这样的句子： 1234567春眠不觉晓，处处闻啼鸟。夜来风雨声，花落知多少。登鹳雀楼王之涣白日依山尽，黄河入海流。欲穷千里目，更上一层楼。  看起来很惊艳，对吧？ 但我要先剧透：它不是在写诗，它是在背诗。 训练 loss 降到 0.03，验证 loss 却高达 12.9——这是教科书级的过拟合。本文会把这个”翻车现场”完整展示给你，因为理解它为什么翻车，比看它写出诗更重要。 这一篇你会学到：  GPT 和上一篇的 Transformer 到底差在哪； “预测下一个字”如何变成训练信号； 因果自注意力、Pre-LN、残差、权重共享，每个零件为什么存在； 一个完整 GPT 的训练和生成代码； 为什么小数据上的”惊艳效果”往往是记忆，而不是智能。  完整可运...</div></div></div></a></div></div></div><div class="aside-content" id="aside-content"><div class="card-widget card-info text-center"><div class="avatar-img"><img src="/img/avatar.jpg" onerror="this.onerror=null;this.src='/img/friend_404.gif'" alt="avatar"/></div><div class="author-info-name">CHENHUI</div><div class="author-info-description">一个个人技术博客</div><div class="site-data"><a href="/archives/"><div class="headline">文章</div><div class="length-num">9</div></a><a href="/tags/"><div class="headline">标签</div><div class="length-num">27</div></a><a href="/categories/"><div class="headline">分类</div><div class="length-num">1</div></a></div><a id="card-info-btn" target="_blank" rel="noopener" href="https://github.com/CHENHUI05"><i class="fab fa-github"></i><span>Follow Me</span></a></div><div class="card-widget card-announcement"><div class="item-headline"><i class="fas fa-bullhorn fa-shake"></i><span>公告</span></div><div class="announcement_content">欢迎来到我的博客！</div></div><div class="sticky_layout"><div class="card-widget" id="card-toc"><div class="item-headline"><i class="fas fa-stream"></i><span>目录</span><span class="toc-percentage"></span></div><div class="toc-content"><ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%86%99%E5%9C%A8%E5%89%8D%E9%9D%A2"><span class="toc-text">写在前面</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E4%B8%80%E3%80%81%E6%A8%A1%E5%9E%8B%E8%BE%93%E5%87%BA%E7%9A%84%E4%B8%8D%E6%98%AF%E5%AD%97%EF%BC%8C%E6%98%AF%E5%88%86%E5%B8%83"><span class="toc-text">一、模型输出的不是字，是分布</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#1-1-%E4%BB%8E-logits-%E5%88%B0%E6%A6%82%E7%8E%87"><span class="toc-text">1.1 从 logits 到概率</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#1-2-%E4%B8%BA%E4%BB%80%E4%B9%88%E5%90%8C%E4%B8%80%E4%B8%AA%E9%97%AE%E9%A2%98%E6%AF%8F%E6%AC%A1%E7%AD%94%E6%A1%88%E4%B8%8D%E5%90%8C"><span class="toc-text">1.2 为什么同一个问题每次答案不同</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E4%BA%8C%E3%80%81%E8%B4%AA%E5%BF%83%E8%A7%A3%E7%A0%81%EF%BC%9A%E6%B0%B8%E8%BF%9C%E9%80%89%E7%AC%AC%E4%B8%80%E5%90%8D"><span class="toc-text">二、贪心解码：永远选第一名</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E4%B8%89%E3%80%81%E6%B8%A9%E5%BA%A6%EF%BC%9A%E6%8A%8A%E5%88%86%E5%B8%83%E5%8E%8B%E5%B0%96%E6%88%96%E6%91%8A%E5%B9%B3"><span class="toc-text">三、温度：把分布压尖或摊平</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#3-1-%E5%85%AC%E5%BC%8F"><span class="toc-text">3.1 公式</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#3-2-%E7%9C%9F%E5%AE%9E%E6%95%B0%E5%AD%97"><span class="toc-text">3.2 真实数字</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#3-3-%E6%B8%A9%E5%BA%A6%E4%B8%8D%E6%98%AF%E8%B6%8A%E9%AB%98%E8%B6%8A%E8%81%AA%E6%98%8E"><span class="toc-text">3.3 温度不是越高越聪明</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%9B%9B%E3%80%81Top-k%EF%BC%9A%E5%8F%AA%E5%9C%A8%E5%89%8D-k-%E5%90%8D%E9%87%8C%E6%8A%BD"><span class="toc-text">四、Top-k：只在前 k 名里抽</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E4%BA%94%E3%80%81Top-p%EF%BC%9A%E6%8C%89%E7%B4%AF%E7%A7%AF%E6%A6%82%E7%8E%87%E5%8A%A8%E6%80%81%E6%88%AA%E6%96%AD"><span class="toc-text">五、Top-p：按累积概率动态截断</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#5-1-Top-k-%E5%92%8C-Top-p-%E4%B8%80%E8%B5%B7%E7%94%A8%EF%BC%9F"><span class="toc-text">5.1 Top-k 和 Top-p 一起用？</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#5-2-%E6%96%B0%E4%B8%80%E7%82%B9%E7%9A%84%E9%80%89%E6%8B%A9%EF%BC%9AMin-p"><span class="toc-text">5.2 新一点的选择：Min-p</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%85%AD%E3%80%81%E9%87%8D%E5%A4%8D%E6%83%A9%E7%BD%9A%EF%BC%9A%E5%88%AB%E8%AE%A9%E6%A8%A1%E5%9E%8B%E5%A4%8D%E8%AF%BB"><span class="toc-text">六、重复惩罚：别让模型复读</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E4%B8%83%E3%80%81%E5%85%B6%E4%BB%96%E8%A7%A3%E7%A0%81%E6%96%B9%E5%BC%8F"><span class="toc-text">七、其他解码方式</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#7-1-Beam-Search%EF%BC%88%E6%9D%9F%E6%90%9C%E7%B4%A2%EF%BC%89"><span class="toc-text">7.1 Beam Search（束搜索）</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#7-2-%E7%BA%A6%E6%9D%9F%E8%A7%A3%E7%A0%81%EF%BC%88Constrained-Decoding%EF%BC%89"><span class="toc-text">7.2 约束解码（Constrained Decoding）</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#7-3-Logit-Bias-%E4%B8%8E-Stop-Sequences"><span class="toc-text">7.3 Logit Bias 与 Stop Sequences</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#7-4-%E6%8A%95%E6%9C%BA%E8%A7%A3%E7%A0%81%EF%BC%88Speculative-Decoding%EF%BC%89"><span class="toc-text">7.4 投机解码（Speculative Decoding）</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%85%AB%E3%80%81%E5%8A%A8%E6%89%8B%EF%BC%9A%E4%B8%80%E6%AE%B5%E4%BB%A3%E7%A0%81%E7%9C%8B%E9%87%87%E6%A0%B7%E6%95%88%E6%9E%9C"><span class="toc-text">八、动手：一段代码看采样效果</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E4%B9%9D%E3%80%81%E5%8F%82%E6%95%B0%E6%80%8E%E4%B9%88%E9%85%8D%EF%BC%9A%E4%B8%80%E5%BC%A0%E5%AE%9E%E7%94%A8%E8%A1%A8"><span class="toc-text">九、参数怎么配：一张实用表</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%8D%81%E3%80%81%E5%B8%B8%E8%A7%81%E8%AF%AF%E5%8C%BA"><span class="toc-text">十、常见误区</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%8D%81%E4%B8%80%E3%80%81%E6%80%BB%E7%BB%93"><span class="toc-text">十一、总结</span></a></li></ol></div></div><div class="card-widget card-recent-post"><div class="item-headline"><i class="fas fa-history"></i><span>最新文章</span></div><div class="aside-list"><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2026/11/02/llm-hallucination-rag/" title="大模型为什么会胡说八道：幻觉、知识截止与 RAG">大模型为什么会胡说八道：幻觉、知识截止与 RAG</a><time datetime="2026-11-02T13:00:00.000Z" title="发表于 2026-11-02 21:00:00">2026-11-02</time></div></div><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2026/11/01/context-window-kv-cache/" title="上下文窗口与 KV Cache：大模型的&quot;记忆&quot;为什么又贵又短">上下文窗口与 KV Cache：大模型的&quot;记忆&quot;为什么又贵又短</a><time datetime="2026-11-01T12:20:00.000Z" title="发表于 2026-11-01 20:20:00">2026-11-01</time></div></div><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2026/10/30/llm-training-pipeline/" title="大模型是怎么炼成的：预训练、SFT 与对齐">大模型是怎么炼成的：预训练、SFT 与对齐</a><time datetime="2026-10-30T13:10:00.000Z" title="发表于 2026-10-30 21:10:00">2026-10-30</time></div></div><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2026/10/28/llm-sampling-decoding/" title="温度、Top-k 与 Top-p：大模型是怎么&quot;挑词&quot;的">温度、Top-k 与 Top-p：大模型是怎么&quot;挑词&quot;的</a><time datetime="2026-10-28T12:40:00.000Z" title="发表于 2026-10-28 20:40:00">2026-10-28</time></div></div><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2026/10/26/tokenizer-bpe-explained/" title="大模型眼里的文字：手撕 Tokenizer 与 BPE 分词">大模型眼里的文字：手撕 Tokenizer 与 BPE 分词</a><time datetime="2026-10-26T13:00:00.000Z" title="发表于 2026-10-26 21:00:00">2026-10-26</time></div></div></div></div></div></div></main><footer id="footer"><div class="footer-other"><div class="footer-copyright"><span class="copyright">&copy;&nbsp;2025 - 2026 By CHENHUI</span></div></div></footer></div><div id="rightside"><div id="rightside-config-hide"><button id="readmode" type="button" title="阅读模式"><i class="fas fa-book-open"></i></button><button id="darkmode" type="button" title="日间和夜间模式切换"><i class="fas fa-adjust"></i></button><button id="hide-aside-btn" type="button" title="单栏和双栏切换"><i class="fas fa-arrows-alt-h"></i></button></div><div id="rightside-config-show"><button id="rightside-config" type="button" title="设置"><i class="fas fa-cog fa-spin"></i></button><button class="close" id="mobile-toc-button" type="button" title="目录"><i class="fas fa-list-ul"></i></button><button id="go-up" type="button" title="回到顶部"><span class="scroll-percent"></span><i class="fas fa-arrow-up"></i></button></div></div><div><script src="/js/utils.js?v=5.5.4"></script><script src="/js/main.js?v=5.5.4"></script><div class="js-pjax"><script>(() => {
+  const parseViewBox = viewBox => {
+    if (!viewBox) return null
+    const parts = viewBox.trim().split(/[\s,]+/).map(n => Number(n))
+    if (parts.length !== 4 || parts.some(n => Number.isNaN(n))) return null
+    return parts
+  }
+
+  const getSvgViewBox = svg => {
+    const attr = parseViewBox(svg.getAttribute('viewBox'))
+    if (attr) return attr
+
+    // Fallback: use bbox to build a viewBox
+    try {
+      const bbox = svg.getBBox()
+      if (bbox && bbox.width && bbox.height) return [bbox.x, bbox.y, bbox.width, bbox.height]
+    } catch (e) {
+      // getBBox may fail on some edge cases; ignore
+    }
+
+    const w = Number(svg.getAttribute('width')) || 0
+    const h = Number(svg.getAttribute('height')) || 0
+    if (w > 0 && h > 0) return [0, 0, w, h]
+    return [0, 0, 100, 100]
+  }
+
+  const setSvgViewBox = (svg, vb) => {
+    svg.setAttribute('viewBox', `${vb[0]} ${vb[1]} ${vb[2]} ${vb[3]}`)
+  }
+
+  const clamp = (v, min, max) => Math.max(min, Math.min(max, v))
+
+  const openSvgInNewTab = ({ source, initViewBox }) => {
+    const getClonedSvg = () => {
+      if (typeof source === 'string') {
+        const template = document.createElement('template')
+        template.innerHTML = source.trim()
+        const svg = template.content.querySelector('svg')
+        return svg ? svg.cloneNode(true) : null
+      }
+      if (source && typeof source.cloneNode === 'function') {
+        return source.cloneNode(true)
+      }
+      return null
+    }
+
+    const clone = getClonedSvg()
+    if (!clone) return
+    if (initViewBox && initViewBox.length === 4) {
+      clone.setAttribute('viewBox', initViewBox.join(' '))
+    }
+    if (!clone.getAttribute('xmlns')) clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+    if (!clone.getAttribute('xmlns:xlink') && clone.outerHTML.includes('xlink:')) {
+      clone.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink')
+    }
+    // inject background to match current theme
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark'
+    const bg = getComputedStyle(document.body).backgroundColor || (isDark ? '#1e1e1e' : '#ffffff')
+    if (!clone.style.background) clone.style.background = bg
+
+    const serializer = new XMLSerializer()
+    const svgSource = serializer.serializeToString(clone)
+    const htmlSource = `<!doctype html><html><head><meta charset="utf-8" />
+      <style>
+        html, body { width: 100%; height: 100%; margin: 0; display: flex; align-items: center; justify-content: center; background: ${bg}; }
+        svg { max-width: 100%; max-height: 100%; height: auto; width: auto; }
+      </style>
+      </head><body>${svgSource}</body></html>`
+    const blob = new Blob([htmlSource], { type: 'text/html;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    window.open(url, '_blank', 'noopener')
+    setTimeout(() => URL.revokeObjectURL(url), 30000)
+  }
+
+  const attachMermaidViewerButton = wrap => {
+    let btn = wrap.querySelector('.mermaid-open-btn')
+    if (!btn) {
+      btn = document.createElement('button')
+      btn.type = 'button'
+      btn.className = 'mermaid-open-btn'
+      wrap.appendChild(btn)
+    }
+
+    btn.innerHTML = '<i class="fa fa-search fa-fw" aria-hidden="true"></i>'
+
+    if (!btn.__mermaidViewerBound) {
+      btn.addEventListener('click', e => {
+        e.preventDefault()
+        e.stopPropagation()
+        const svg = wrap.__mermaidOriginalSvg || wrap.querySelector('svg')
+        if (!svg) return
+        const initViewBox = wrap.__mermaidInitViewBox
+        if (typeof svg === 'string') {
+          openSvgInNewTab({ source: svg, initViewBox })
+          return
+        }
+        openSvgInNewTab({ source: svg, initViewBox })
+      })
+      btn.__mermaidViewerBound = true
+    }
+  }
+
+  // Zoom around a point (px, py) in the SVG viewport (in viewBox coordinates)
+  const zoomAtPoint = (vb, factor, px, py) => {
+    const w = vb[2] * factor
+    const h = vb[3] * factor
+    const nx = px - (px - vb[0]) * factor
+    const ny = py - (py - vb[1]) * factor
+    return [nx, ny, w, h]
+  }
+
+  const initMermaidGestures = wrap => {
+    const svg = wrap.querySelector('svg')
+    if (!svg) return
+
+    // Ensure viewBox exists so gestures always work
+    const initVb = getSvgViewBox(svg)
+    wrap.__mermaidInitViewBox = initVb
+    wrap.__mermaidCurViewBox = initVb.slice()
+    setSvgViewBox(svg, initVb)
+
+    // Avoid binding multiple times on themeChange/pjax
+    if (wrap.__mermaidGestureBound) return
+    wrap.__mermaidGestureBound = true
+
+    // Helper: map client (viewport) coordinate -> viewBox coordinate
+    const clientToViewBox = (clientX, clientY) => {
+      const rect = svg.getBoundingClientRect()
+      const vb = wrap.__mermaidCurViewBox || getSvgViewBox(svg)
+      const x = vb[0] + (clientX - rect.left) * (vb[2] / rect.width)
+      const y = vb[1] + (clientY - rect.top) * (vb[3] / rect.height)
+      return { x, y, rect, vb }
+    }
+
+    const state = {
+      pointers: new Map(),
+      startVb: null,
+      startDist: 0,
+      startCenter: null
+    }
+
+    const clampVb = vb => {
+      const init = wrap.__mermaidInitViewBox || vb
+      const minW = init[2] * 0.1
+      const maxW = init[2] * 10
+      const minH = init[3] * 0.1
+      const maxH = init[3] * 10
+      vb[2] = clamp(vb[2], minW, maxW)
+      vb[3] = clamp(vb[3], minH, maxH)
+      return vb
+    }
+
+    const setCurVb = vb => {
+      vb = clampVb(vb)
+      wrap.__mermaidCurViewBox = vb
+      setSvgViewBox(svg, vb)
+    }
+
+    const onPointerDown = e => {
+      // Allow only primary button for mouse
+      if (e.pointerType === 'mouse' && e.button !== 0) return
+      svg.setPointerCapture(e.pointerId)
+      state.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
+
+      if (state.pointers.size === 1) {
+        state.startVb = (wrap.__mermaidCurViewBox || getSvgViewBox(svg)).slice()
+      } else if (state.pointers.size === 2) {
+        const pts = [...state.pointers.values()]
+        const dx = pts[0].x - pts[1].x
+        const dy = pts[0].y - pts[1].y
+        state.startDist = Math.hypot(dx, dy)
+        state.startVb = (wrap.__mermaidCurViewBox || getSvgViewBox(svg)).slice()
+        state.startCenter = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 }
+      }
+    }
+
+    const onPointerMove = e => {
+      if (!state.pointers.has(e.pointerId)) return
+      state.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
+
+      // Pan with 1 pointer
+      if (state.pointers.size === 1 && state.startVb) {
+        const p = [...state.pointers.values()][0]
+        const prev = { x: e.clientX - e.movementX, y: e.clientY - e.movementY }
+        // movementX/Y unreliable on touch, compute from stored last position
+        const last = wrap.__mermaidLastSinglePointer || p
+        const dxClient = p.x - last.x
+        const dyClient = p.y - last.y
+        wrap.__mermaidLastSinglePointer = p
+
+        const { rect } = clientToViewBox(p.x, p.y)
+        const vb = (wrap.__mermaidCurViewBox || getSvgViewBox(svg)).slice()
+        const dx = dxClient * (vb[2] / rect.width)
+        const dy = dyClient * (vb[3] / rect.height)
+        setCurVb([vb[0] - dx, vb[1] - dy, vb[2], vb[3]])
+        return
+      }
+
+      // Pinch zoom with 2 pointers
+      if (state.pointers.size === 2 && state.startVb && state.startDist > 0) {
+        const pts = [...state.pointers.values()]
+        const dx = pts[0].x - pts[1].x
+        const dy = pts[0].y - pts[1].y
+        const dist = Math.hypot(dx, dy)
+        if (!dist) return
+        const factor = state.startDist / dist // dist bigger => zoom in (viewBox smaller)
+
+        const cx = (pts[0].x + pts[1].x) / 2
+        const cy = (pts[0].y + pts[1].y) / 2
+        const centerClient = { x: cx, y: cy }
+
+        const pxy = clientToViewBox(centerClient.x, centerClient.y)
+        const cpx = pxy.x
+        const cpy = pxy.y
+
+        const vb = zoomAtPoint(state.startVb, factor, cpx, cpy)
+        setCurVb(vb)
+      }
+    }
+
+    const onPointerUpOrCancel = e => {
+      state.pointers.delete(e.pointerId)
+      if (state.pointers.size === 0) {
+        state.startVb = null
+        state.startDist = 0
+        state.startCenter = null
+        wrap.__mermaidLastSinglePointer = null
+      } else if (state.pointers.size === 1) {
+        // reset single pointer baseline to avoid jump
+        wrap.__mermaidLastSinglePointer = [...state.pointers.values()][0]
+      }
+    }
+
+    // Wheel zoom (mouse/trackpad)
+    const onWheel = e => {
+      // ctrlKey on mac trackpad pinch; we treat both as zoom
+      e.preventDefault()
+      const delta = e.deltaY
+      const zoomFactor = delta > 0 ? 1.1 : 0.9
+      const { x, y } = clientToViewBox(e.clientX, e.clientY)
+      const vb = (wrap.__mermaidCurViewBox || getSvgViewBox(svg)).slice()
+      setCurVb(zoomAtPoint(vb, zoomFactor, x, y))
+    }
+
+    const onDblClick = () => {
+      const init = wrap.__mermaidInitViewBox
+      if (!init) return
+      wrap.__mermaidCurViewBox = init.slice()
+      setSvgViewBox(svg, init)
+    }
+
+    svg.addEventListener('pointerdown', onPointerDown)
+    svg.addEventListener('pointermove', onPointerMove)
+    svg.addEventListener('pointerup', onPointerUpOrCancel)
+    svg.addEventListener('pointercancel', onPointerUpOrCancel)
+    svg.addEventListener('wheel', onWheel, { passive: false })
+    svg.addEventListener('dblclick', onDblClick)
+  }
+
+  const runMermaid = ele => {
+    window.loadMermaid = true
+    const theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'default'
+
+    ele.forEach((item, index) => {
+      const mermaidSrc = item.firstElementChild
+
+      // Clear old render (themeChange/pjax will rerun)
+      const oldSvg = item.querySelector('svg')
+      if (oldSvg) oldSvg.remove()
+      item.__mermaidGestureBound = false
+
+      const config = mermaidSrc.dataset.config ? JSON.parse(mermaidSrc.dataset.config) : {}
+      if (!config.theme) {
+        config.theme = theme
+      }
+      const mermaidThemeConfig = `%%{init: ${JSON.stringify(config)}}%%\n`
+      const mermaidID = `mermaid-${index}`
+      const mermaidDefinition = mermaidThemeConfig + mermaidSrc.textContent
+
+      const renderFn = mermaid.render(mermaidID, mermaidDefinition)
+      const renderMermaid = svg => {
+        mermaidSrc.insertAdjacentHTML('afterend', svg)
+        if (true) initMermaidGestures(item)
+        item.__mermaidOriginalSvg = svg
+        if (true) attachMermaidViewerButton(item)
+      }
+
+
+      // mermaid v9 and v10 compatibility
+      typeof renderFn === 'string' ? renderMermaid(renderFn) : renderFn.then(({ svg }) => renderMermaid(svg))
+    })
+  }
+
+  const codeToMermaid = () => {
+    const codeMermaidEle = document.querySelectorAll('pre > code.mermaid')
+    if (codeMermaidEle.length === 0) return
+
+    codeMermaidEle.forEach(ele => {
+      const preEle = document.createElement('pre')
+      preEle.className = 'mermaid-src'
+      preEle.hidden = true
+      preEle.textContent = ele.textContent
+      const newEle = document.createElement('div')
+      newEle.className = 'mermaid-wrap'
+      newEle.appendChild(preEle)
+      ele.parentNode.replaceWith(newEle)
+    })
+  }
+
+  const loadMermaid = () => {
+    if (true) codeToMermaid()
+    const $mermaid = document.querySelectorAll('#article-container .mermaid-wrap')
+    if ($mermaid.length === 0) return
+
+    const runMermaidFn = () => runMermaid($mermaid)
+    btf.addGlobalFn('themeChange', runMermaidFn, 'mermaid')
+    window.loadMermaid ? runMermaidFn() : btf.getScript('https://cdn.jsdelivr.net/npm/mermaid@11.12.2/dist/mermaid.min.js').then(runMermaidFn)
+  }
+
+  btf.addGlobalFn('encrypt', loadMermaid, 'mermaid')
+  window.pjax ? loadMermaid() : document.addEventListener('DOMContentLoaded', loadMermaid)
+})()</script></div><script async data-pjax src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script></div></body></html>

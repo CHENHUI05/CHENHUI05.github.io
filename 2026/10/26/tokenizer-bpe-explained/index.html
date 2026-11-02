@@ -1,0 +1,839 @@
+<!DOCTYPE html><html lang="zh-CN" data-theme="light"><head><meta charset="UTF-8"><meta http-equiv="X-UA-Compatible" content="IE=edge"><meta name="viewport" content="width=device-width, initial-scale=1.0,viewport-fit=cover"><title>大模型眼里的文字：手撕 Tokenizer 与 BPE 分词 | CHENHUI的博客</title><meta name="author" content="CHENHUI"><meta name="copyright" content="CHENHUI"><meta name="format-detection" content="telephone=no"><meta name="theme-color" content="#ffffff"><meta name="description" content="大模型不认字，只认 token。从&quot;为什么同一个问题中英文收费不同&quot;讲起，用一百来行纯 Python 手撕 BPE 分词算法，讲透字符、词、子词三种粒度，字节级 BPE、词表大小、特殊 token 与上下文预算。">
+<meta property="og:type" content="article">
+<meta property="og:title" content="大模型眼里的文字：手撕 Tokenizer 与 BPE 分词">
+<meta property="og:url" content="https://chenhui05.github.io/2026/10/26/tokenizer-bpe-explained/index.html">
+<meta property="og:site_name" content="CHENHUI的博客">
+<meta property="og:description" content="大模型不认字，只认 token。从&quot;为什么同一个问题中英文收费不同&quot;讲起，用一百来行纯 Python 手撕 BPE 分词算法，讲透字符、词、子词三种粒度，字节级 BPE、词表大小、特殊 token 与上下文预算。">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:image" content="https://chenhui05.github.io/img/avatar.jpg">
+<meta property="article:published_time" content="2026-10-26T13:00:00.000Z">
+<meta property="article:modified_time" content="2026-11-02T14:17:03.836Z">
+<meta property="article:author" content="CHENHUI">
+<meta property="article:tag" content="BPE">
+<meta property="article:tag" content="NLP">
+<meta property="article:tag" content="Tokenizer">
+<meta property="article:tag" content="大模型">
+<meta property="article:tag" content="大模型基础">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="https://chenhui05.github.io/img/avatar.jpg"><script type="application/ld+json">{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "大模型眼里的文字：手撕 Tokenizer 与 BPE 分词",
+  "url": "https://chenhui05.github.io/2026/10/26/tokenizer-bpe-explained/",
+  "image": "https://chenhui05.github.io/img/avatar.jpg",
+  "datePublished": "2026-10-26T13:00:00.000Z",
+  "dateModified": "2026-11-02T14:17:03.836Z",
+  "author": [
+    {
+      "@type": "Person",
+      "name": "CHENHUI",
+      "url": "https://chenhui05.github.io"
+    }
+  ]
+}</script><link rel="shortcut icon" href="/img/favicon.png"><link rel="canonical" href="https://chenhui05.github.io/2026/10/26/tokenizer-bpe-explained/index.html"><link rel="preconnect" href="//cdn.jsdelivr.net"/><link rel="preconnect" href="//busuanzi.ibruce.info"/><link rel="stylesheet" href="/css/index.css?v=5.5.4"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@7.1.0/css/all.min.css"><script>
+    (() => {
+      
+    const saveToLocal = {
+      set: (key, value, ttl) => {
+        if (!ttl) return
+        const expiry = Date.now() + ttl * 86400000
+        localStorage.setItem(key, JSON.stringify({ value, expiry }))
+      },
+      get: key => {
+        const itemStr = localStorage.getItem(key)
+        if (!itemStr) return undefined
+        const { value, expiry } = JSON.parse(itemStr)
+        if (Date.now() > expiry) {
+          localStorage.removeItem(key)
+          return undefined
+        }
+        return value
+      }
+    }
+
+    window.btf = {
+      saveToLocal,
+      getScript: (url, attr = {}) => new Promise((resolve, reject) => {
+        const script = document.createElement('script')
+        script.src = url
+        script.async = true
+        Object.entries(attr).forEach(([key, val]) => script.setAttribute(key, val))
+        script.onload = script.onreadystatechange = () => {
+          if (!script.readyState || /loaded|complete/.test(script.readyState)) resolve()
+        }
+        script.onerror = reject
+        document.head.appendChild(script)
+      }),
+      getCSS: (url, id) => new Promise((resolve, reject) => {
+        const link = document.createElement('link')
+        link.rel = 'stylesheet'
+        link.href = url
+        if (id) link.id = id
+        link.onload = link.onreadystatechange = () => {
+          if (!link.readyState || /loaded|complete/.test(link.readyState)) resolve()
+        }
+        link.onerror = reject
+        document.head.appendChild(link)
+      }),
+      addGlobalFn: (key, fn, name = false, parent = window) => {
+        if (!false && key.startsWith('pjax')) return
+        const globalFn = parent.globalFn || {}
+        globalFn[key] = globalFn[key] || {}
+        globalFn[key][name || Object.keys(globalFn[key]).length] = fn
+        parent.globalFn = globalFn
+      }
+    }
+  
+      
+      const activateDarkMode = () => {
+        document.documentElement.setAttribute('data-theme', 'dark')
+        if (document.querySelector('meta[name="theme-color"]') !== null) {
+          document.querySelector('meta[name="theme-color"]').setAttribute('content', '#0d0d0d')
+        }
+      }
+      const activateLightMode = () => {
+        document.documentElement.setAttribute('data-theme', 'light')
+        if (document.querySelector('meta[name="theme-color"]') !== null) {
+          document.querySelector('meta[name="theme-color"]').setAttribute('content', '#ffffff')
+        }
+      }
+
+      btf.activateDarkMode = activateDarkMode
+      btf.activateLightMode = activateLightMode
+
+      const theme = saveToLocal.get('theme')
+    
+          theme === 'dark' ? activateDarkMode() : theme === 'light' ? activateLightMode() : null
+        
+      
+      const asideStatus = saveToLocal.get('aside-status')
+      if (asideStatus !== undefined) {
+        document.documentElement.classList.toggle('hide-aside', asideStatus === 'hide')
+      }
+    
+      
+    const detectApple = () => {
+      if (/iPad|iPhone|iPod|Macintosh/.test(navigator.userAgent)) {
+        document.documentElement.classList.add('apple')
+      }
+    }
+    detectApple()
+  
+    })()
+  </script><script>const GLOBAL_CONFIG = {
+  root: '/',
+  algolia: undefined,
+  localSearch: undefined,
+  translate: undefined,
+  highlight: {"plugin":"highlight.js","highlightCopy":true,"highlightLang":true,"highlightHeightLimit":false,"highlightFullpage":false,"highlightMacStyle":false},
+  copy: {
+    success: '复制成功',
+    error: '复制失败',
+    noSupport: '浏览器不支持'
+  },
+  relativeDate: {
+    homepage: false,
+    post: false
+  },
+  runtime: '',
+  dateSuffix: {
+    just: '刚刚',
+    min: '分钟前',
+    hour: '小时前',
+    day: '天前',
+    month: '个月前'
+  },
+  copyright: undefined,
+  lightbox: 'null',
+  Snackbar: undefined,
+  infinitegrid: {
+    js: 'https://cdn.jsdelivr.net/npm/@egjs/infinitegrid@4.13.0/dist/infinitegrid.min.js',
+    buttonText: '加载更多'
+  },
+  isPhotoFigcaption: false,
+  islazyloadPlugin: false,
+  isAnchor: false,
+  percent: {
+    toc: true,
+    rightside: false,
+  },
+  autoDarkmode: false
+}</script><script id="config-diff">var GLOBAL_CONFIG_SITE = {
+  title: '大模型眼里的文字：手撕 Tokenizer 与 BPE 分词',
+  isHighlightShrink: false,
+  isToc: true,
+  pageType: 'post'
+}</script><meta name="generator" content="Hexo 8.1.2"></head><body><div id="sidebar"><div id="menu-mask"></div><div id="sidebar-menus"><div class="avatar-img text-center"><img src="/img/avatar.jpg" onerror="this.onerror=null;this.src='/img/friend_404.gif'" alt="avatar"/></div><div class="site-data text-center"><a href="/archives/"><div class="headline">文章</div><div class="length-num">9</div></a><a href="/tags/"><div class="headline">标签</div><div class="length-num">27</div></a><a href="/categories/"><div class="headline">分类</div><div class="length-num">1</div></a></div><div class="menus_items"><div class="menus_item"><a class="site-page" href="/"><i class="fa-fw fas fa-home"></i><span> 首页</span></a></div><div class="menus_item"><a class="site-page" href="/archives/"><i class="fa-fw fas fa-archive"></i><span> 归档</span></a></div><div class="menus_item"><a class="site-page" href="/tags/"><i class="fa-fw fas fa-tags"></i><span> 标签</span></a></div><div class="menus_item"><a class="site-page" href="/categories/"><i class="fa-fw fas fa-folder-open"></i><span> 分类</span></a></div><div class="menus_item"><a class="site-page" href="/about/"><i class="fa-fw fas fa-heart"></i><span> 关于</span></a></div></div></div></div><div class="post" id="body-wrap"><header class="post-bg" id="page-header"><nav id="nav"><span id="blog-info"><a class="nav-site-title" href="/"><span class="site-name">CHENHUI的博客</span></a><a class="nav-page-title" href="/"><span class="site-name">大模型眼里的文字：手撕 Tokenizer 与 BPE 分词</span><span class="site-name"><i class="fa-solid fa-circle-arrow-left"></i><span>  返回首页</span></span></a></span><div id="menus"><div class="menus_items"><div class="menus_item"><a class="site-page" href="/"><i class="fa-fw fas fa-home"></i><span> 首页</span></a></div><div class="menus_item"><a class="site-page" href="/archives/"><i class="fa-fw fas fa-archive"></i><span> 归档</span></a></div><div class="menus_item"><a class="site-page" href="/tags/"><i class="fa-fw fas fa-tags"></i><span> 标签</span></a></div><div class="menus_item"><a class="site-page" href="/categories/"><i class="fa-fw fas fa-folder-open"></i><span> 分类</span></a></div><div class="menus_item"><a class="site-page" href="/about/"><i class="fa-fw fas fa-heart"></i><span> 关于</span></a></div></div><div id="toggle-menu"><span class="site-page"><i class="fas fa-bars fa-fw"></i></span></div></div></nav><div id="post-info"><h1 class="post-title">大模型眼里的文字：手撕 Tokenizer 与 BPE 分词</h1><div id="post-meta"><div class="meta-firstline"><span class="post-meta-date"><i class="far fa-calendar-alt fa-fw post-meta-icon"></i><span class="post-meta-label">发表于</span><time class="post-meta-date-created" datetime="2026-10-26T13:00:00.000Z" title="发表于 2026-10-26 21:00:00">2026-10-26</time><span class="post-meta-separator">|</span><i class="fas fa-history fa-fw post-meta-icon"></i><span class="post-meta-label">更新于</span><time class="post-meta-date-updated" datetime="2026-11-02T14:17:03.836Z" title="更新于 2026-11-02 22:17:03">2026-11-02</time></span><span class="post-meta-categories"><span class="post-meta-separator">|</span><i class="fas fa-inbox fa-fw post-meta-icon"></i><a class="post-meta-categories" href="/categories/%E4%BA%BA%E5%B7%A5%E6%99%BA%E8%83%BD/">人工智能</a></span></div><div class="meta-secondline"><span class="post-meta-separator">|</span><span class="post-meta-pv-cv" id="" data-flag-title=""><i class="far fa-eye fa-fw post-meta-icon"></i><span class="post-meta-label">浏览量:</span><span id="busuanzi_value_page_pv"><i class="fa-solid fa-spinner fa-spin"></i></span></span></div></div></div></header><main class="layout" id="content-inner"><div id="post"><article class="container post-content" id="article-container"><h2 id="写在前面"><a href="#写在前面" class="headerlink" title="写在前面"></a>写在前面</h2><p>你给大模型 API 付的钱，是按 <strong>token</strong> 算的，不是按字数，也不是按单词数。</p>
+<p>同样一段意思，写成英文可能只要 20 个 token，写成中文可能要 35 个；同一个问题问两遍，第二次如果多了几个空格，token 数也可能变化。更诡异的是，很多人发现模型数不清 <code>strawberry</code> 里有几个 <code>r</code>——因为在它眼里，<code>strawberry</code> 根本不是由字母组成的，而是一两个<strong>整体编号</strong>。</p>
+<p>这些现象背后是同一个东西：<strong>Tokenizer（分词器）</strong>。</p>
+<p>它是大模型流水线的第一道工序，也是最多人忽略的一道。模型再聪明，也只能处理分词器递给它的那串整数。这一篇我们就把它拆开：</p>
+<ul>
+<li>为什么不能直接按”字”或按”词”切？</li>
+<li>BPE 算法到底在合并什么？用一百来行纯 Python 亲手实现；</li>
+<li>字节级 BPE 如何做到”任何文字都能编码”；</li>
+<li>词表大小如何影响参数量、上下文和账单；</li>
+<li>实际开发中最容易踩的 token 坑。</li>
+</ul>
+<p>这是「大模型基础」系列的第二篇。第一篇我们手撕了迷你 GPT，知道了模型在”预测下一个 token”；这一篇回答一个更前置的问题：<strong>token 到底是什么？</strong></p>
+<span id="more"></span>
+
+<h2 id="一、先看三个真实场景"><a href="#一、先看三个真实场景" class="headerlink" title="一、先看三个真实场景"></a>一、先看三个真实场景</h2><h3 id="1-1-场景一：同一个问题，中英文价格不同"><a href="#1-1-场景一：同一个问题，中英文价格不同" class="headerlink" title="1.1 场景一：同一个问题，中英文价格不同"></a>1.1 场景一：同一个问题，中英文价格不同</h3><p>假设你调用某家 API，价格是”每百万 token 若干元”。你写：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">中文：请解释一下什么是机器学习。</span><br><span class="line">英文：Please explain what machine learning is.</span><br></pre></td></tr></table></figure>
+
+<p>两句话意思一样，但分词后的 token 数通常不同。英文大约 8 个 token，中文常见分词器下大约 10~14 个。原因很简单：<strong>分词器的词表是按训练语料的统计规律构建的，英文语料多，英文的常见词和词片段被合并得更充分，压缩率更高。</strong></p>
+<p>这不是”中文更难”，而是分词器的”偏心”。它直接影响三件事：</p>
+<ol>
+<li><strong>钱</strong>：同样内容，token 多的语言更贵；</li>
+<li><strong>速度</strong>：token 多，生成同样内容需要的步数多；</li>
+<li><strong>有效上下文</strong>：128k token 的窗口，中文能装的内容比英文少。</li>
+</ol>
+<h3 id="1-2-场景二：为什么模型数不清字母"><a href="#1-2-场景二：为什么模型数不清字母" class="headerlink" title="1.2 场景二：为什么模型数不清字母"></a>1.2 场景二：为什么模型数不清字母</h3><p><code>strawberry</code> 被 GPT-2 的分词器切成 <code>straw</code> + <code>berry</code> 两个 token（不同版本可能略有差异）。模型看到的是两个编号，而不是 10 个字母。它当然可以靠训练中学到的拼写关联答对，但”逐字母操作”对它来说天生别扭。</p>
+<p>同理，模型做多位数乘法容易出错，一个重要原因是数字被切得七零八落：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">&quot;123456&quot; 可能被切成 [&quot;123&quot;, &quot;456&quot;] 或 [&quot;12&quot;, &quot;345&quot;, &quot;6&quot;]</span><br></pre></td></tr></table></figure>
+
+<p>它看到的不是六个数位，而是几个”块”。所以现在的大模型遇到算术、字符串处理，普遍会调用计算器或代码解释器——不是它笨，是它的”眼睛”分辨率不对。</p>
+<h3 id="1-3-场景三：改一个空格，缓存失效"><a href="#1-3-场景三：改一个空格，缓存失效" class="headerlink" title="1.3 场景三：改一个空格，缓存失效"></a>1.3 场景三：改一个空格，缓存失效</h3><p>很多推理服务支持 <strong>Prompt Caching（提示词缓存）</strong>：前缀相同就能复用计算。但如果你在开头多打一个空格，或者把标点从全角改成半角，分词结果变了，缓存就命中不了，费用和延迟都会上升。</p>
+<p><strong>Token 是模型世界的最小货币单位。</strong> 不理解 token，就很难真正理解大模型的成本、速度和能力边界。</p>
+<h2 id="二、三种切法：字符、词、子词"><a href="#二、三种切法：字符、词、子词" class="headerlink" title="二、三种切法：字符、词、子词"></a>二、三种切法：字符、词、子词</h2><p>要让模型处理文字，第一步是把一段字符串变成一串整数。切分粒度有三种选择。</p>
+<h3 id="2-1-按字符切（Character-level）"><a href="#2-1-按字符切（Character-level）" class="headerlink" title="2.1 按字符切（Character-level）"></a>2.1 按字符切（Character-level）</h3><p>每个字符一个 token：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">&quot;我爱大模型&quot; -&gt; [&quot;我&quot;, &quot;爱&quot;, &quot;大&quot;, &quot;模&quot;, &quot;型&quot;] -&gt; [7, 23, 105, 88, 66]</span><br></pre></td></tr></table></figure>
+
+<p><strong>优点</strong>：词表极小（常用汉字几千个），永远不会遇到”没见过的词”，实现简单。</p>
+<p><strong>缺点</strong>：序列太长。一句话几百个字符，模型要处理的步数暴增；而且单个字符携带的语义太少，模型得花更多层才能把”大”和”模”拼成”大模”、再拼成”大模型”。</p>
+<p>第一篇里我们的迷你 GPT 就是字符级的，因为玩具语料只有几百个字，字符级最省事。但真实大模型不会这么做。</p>
+<h3 id="2-2-按词切（Word-level）"><a href="#2-2-按词切（Word-level）" class="headerlink" title="2.2 按词切（Word-level）"></a>2.2 按词切（Word-level）</h3><p>每个词一个 token：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">&quot;我爱大模型&quot; -&gt; [&quot;我&quot;, &quot;爱&quot;, &quot;大模型&quot;] -&gt; [7, 23, 1203]</span><br></pre></td></tr></table></figure>
+
+<p><strong>优点</strong>：序列短，一个 token 就是一个完整语义单位。</p>
+<p><strong>缺点</strong>：词表会爆炸。中文词汇量以十万计，英文加上专有名词、缩写、变形更是无穷无尽。更致命的是 <strong>OOV（Out-of-Vocabulary）问题</strong>：训练时没见过的词（新人名、新梗、拼写错误、化学式）没有编号，只能统一变成 <code>&lt;UNK&gt;</code>，信息直接丢失。</p>
+<h3 id="2-3-按子词切（Subword-level）"><a href="#2-3-按子词切（Subword-level）" class="headerlink" title="2.3 按子词切（Subword-level）"></a>2.3 按子词切（Subword-level）</h3><p>这是现代大模型的答案：<strong>常见词整块保留，罕见词拆成更小的片段。</strong></p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">&quot;我爱大模型&quot;       -&gt; [&quot;我&quot;, &quot;爱&quot;, &quot;大模型&quot;]</span><br><span class="line">&quot;我爱大语言模型&quot;   -&gt; [&quot;我&quot;, &quot;爱&quot;, &quot;大&quot;, &quot;语言&quot;, &quot;模型&quot;]</span><br><span class="line">&quot;unbelievable&quot;    -&gt; [&quot;un&quot;, &quot;believ&quot;, &quot;able&quot;]</span><br></pre></td></tr></table></figure>
+
+<p>这样既能控制词表大小（几万到二十万），又能表示任意新词：没见过的词总能拆成见过的片段。BPE、WordPiece、SentencePiece、Unigram 都属于这一类。</p>
+<table>
+<thead>
+<tr>
+<th>粒度</th>
+<th>词表大小</th>
+<th>序列长度</th>
+<th>新词处理</th>
+<th>典型代表</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>字符级</td>
+<td>几千</td>
+<td>很长</td>
+<td>天然支持</td>
+<td>早期 Char-RNN、玩具模型</td>
+</tr>
+<tr>
+<td>词级</td>
+<td>几十万+</td>
+<td>短</td>
+<td>OOV 直接丢失</td>
+<td>传统 NLP</td>
+</tr>
+<tr>
+<td>子词级</td>
+<td>3 万 ~ 20 万</td>
+<td>中等</td>
+<td>拆成已知片段</td>
+<td>GPT、LLaMA、BERT、Qwen</td>
+</tr>
+</tbody></table>
+<p>一句话总结：<strong>子词分词是在”词表大小”和”序列长度”之间找平衡点的工程妥协。</strong></p>
+<h2 id="三、BPE：从字符开始，反复合并"><a href="#三、BPE：从字符开始，反复合并" class="headerlink" title="三、BPE：从字符开始，反复合并"></a>三、BPE：从字符开始，反复合并</h2><p>BPE 全称 <strong>Byte Pair Encoding（字节对编码）</strong>，1994 年本来是一种数据压缩算法，2016 年被引入神经机器翻译，后来成了 GPT 系列的标配。</p>
+<p>它的思想朴素到不可思议：</p>
+<blockquote>
+<p>从最小的单位开始，反复把<strong>最常一起出现的相邻两个 token</strong> 合并成一个新 token。</p>
+</blockquote>
+<p>就像整理衣柜：先按颜色分组，发现”黑色袜子”特别多，就把它们打包成一包；再发现”黑色袜子+黑色裤子”经常一起出现，再打成一个更大的包。合并的依据只有一个：<strong>出现频率</strong>。</p>
+<h3 id="3-1-一个经典的玩具例子"><a href="#3-1-一个经典的玩具例子" class="headerlink" title="3.1 一个经典的玩具例子"></a>3.1 一个经典的玩具例子</h3><p>假设语料里只有四个词，出现次数如下：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">low     出现 5 次</span><br><span class="line">lower   出现 2 次</span><br><span class="line">newest  出现 6 次</span><br><span class="line">widest  出现 3 次</span><br></pre></td></tr></table></figure>
+
+<p>先给每个词末尾加一个特殊标记 <code>&lt;/w&gt;</code>，表示”词到此结束”，这样 <code>low</code> 和 <code>lower</code> 里的 <code>low</code> 才能区分开：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">l o w &lt;/w&gt;          (5 次)</span><br><span class="line">l o w e r &lt;/w&gt;      (2 次)</span><br><span class="line">n e w e s t &lt;/w&gt;    (6 次)</span><br><span class="line">w i d e s t &lt;/w&gt;    (3 次)</span><br></pre></td></tr></table></figure>
+
+<p>统计所有相邻对：</p>
+<table>
+<thead>
+<tr>
+<th>相邻对</th>
+<th>出现次数</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>l</code> + <code>o</code></td>
+<td>5 + 2 &#x3D; 7</td>
+</tr>
+<tr>
+<td><code>o</code> + <code>w</code></td>
+<td>5 + 2 &#x3D; 7</td>
+</tr>
+<tr>
+<td><code>e</code> + <code>s</code></td>
+<td>6 + 3 &#x3D; 9</td>
+</tr>
+<tr>
+<td><code>s</code> + <code>t</code></td>
+<td>6 + 3 &#x3D; 9</td>
+</tr>
+<tr>
+<td>…</td>
+<td>…</td>
+</tr>
+</tbody></table>
+<p>出现最多的是 <code>e</code>+<code>s</code> 和 <code>s</code>+<code>t</code>（各 9 次）。选一个（比如 <code>e</code>+<code>s</code>）合并成新 token <code>es</code>，语料变成：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">l o w &lt;/w&gt;</span><br><span class="line">l o w es r &lt;/w&gt;</span><br><span class="line">n e w es t &lt;/w&gt;</span><br><span class="line">w i d es t &lt;/w&gt;</span><br></pre></td></tr></table></figure>
+
+<p>然后重新统计，继续合并。重复几轮之后，<code>est&lt;/w&gt;</code>、<code>low&lt;/w&gt;</code> 这些高频片段就诞生了，而 <code>widest</code> 会被切成 <code>wi</code> + <code>d</code> + <code>est&lt;/w&gt;</code>——因为它整体不够常见，但词尾 <code>est</code> 很常见。</p>
+<p>下面是真实运行结果（代码在第四节）：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br></pre></td><td class="code"><pre><span class="line">第  1 次合并: &#x27;e&#x27; + &#x27;s&#x27; (出现 9 次) -&gt; &#x27;es&#x27;</span><br><span class="line">第  2 次合并: &#x27;es&#x27; + &#x27;t&#x27; (出现 9 次) -&gt; &#x27;est&#x27;</span><br><span class="line">第  3 次合并: &#x27;est&#x27; + &#x27;&lt;/w&gt;&#x27; (出现 9 次) -&gt; &#x27;est&lt;/w&gt;&#x27;</span><br><span class="line">第  4 次合并: &#x27;l&#x27; + &#x27;o&#x27; (出现 7 次) -&gt; &#x27;lo&#x27;</span><br><span class="line">第  5 次合并: &#x27;lo&#x27; + &#x27;w&#x27; (出现 7 次) -&gt; &#x27;low&#x27;</span><br><span class="line">第  6 次合并: &#x27;n&#x27; + &#x27;e&#x27; (出现 6 次) -&gt; &#x27;ne&#x27;</span><br><span class="line">第  7 次合并: &#x27;ne&#x27; + &#x27;w&#x27; (出现 6 次) -&gt; &#x27;new&#x27;</span><br><span class="line">第  8 次合并: &#x27;new&#x27; + &#x27;est&lt;/w&gt;&#x27; (出现 6 次) -&gt; &#x27;newest&lt;/w&gt;&#x27;</span><br><span class="line">第  9 次合并: &#x27;low&#x27; + &#x27;&lt;/w&gt;&#x27; (出现 5 次) -&gt; &#x27;low&lt;/w&gt;&#x27;</span><br><span class="line">第 10 次合并: &#x27;w&#x27; + &#x27;i&#x27; (出现 3 次) -&gt; &#x27;wi&#x27;</span><br><span class="line"></span><br><span class="line">合并后每个词被切成了：</span><br><span class="line">  low     -&gt; [&#x27;low&lt;/w&gt;&#x27;]</span><br><span class="line">  lower   -&gt; [&#x27;low&#x27;, &#x27;e&#x27;, &#x27;r&#x27;, &#x27;&lt;/w&gt;&#x27;]</span><br><span class="line">  newest  -&gt; [&#x27;newest&lt;/w&gt;&#x27;]</span><br><span class="line">  widest  -&gt; [&#x27;wi&#x27;, &#x27;d&#x27;, &#x27;est&lt;/w&gt;&#x27;]</span><br></pre></td></tr></table></figure>
+
+<p>注意：这里的次数是<strong>按词频加权</strong>的——<code>e</code>+<code>s</code> 在 <code>newest</code>（6 次）和 <code>widest</code>（3 次）里都出现，所以权重是 9，而不是简单数”它在几个词里出现过”。代码里统计时会乘上词频。</p>
+<p>结果很有意思：</p>
+<ul>
+<li><code>low</code> 出现了 5 次，足够常见，被完整合并成一个 token；</li>
+<li><code>newest</code> 出现 6 次，也被完整合并；</li>
+<li><code>lower</code> 只出现 2 次，整体不够常见，最终被切成 <code>low</code> + <code>e</code> + <code>r</code> + <code>&lt;/w&gt;</code>；</li>
+<li><code>widest</code> 被切成 <code>wi</code> + <code>d</code> + <code>est&lt;/w&gt;</code>，但词尾 <code>est&lt;/w&gt;</code> 因为高频被保留了下来。</li>
+</ul>
+<p><strong>这就是 BPE 的精髓：高频片段被保留，低频词被拆开。</strong></p>
+<h3 id="3-2-训练和编码是两个阶段"><a href="#3-2-训练和编码是两个阶段" class="headerlink" title="3.2 训练和编码是两个阶段"></a>3.2 训练和编码是两个阶段</h3><p>这一点初学者最容易混：</p>
+<ul>
+<li><strong>训练（training）</strong>：在语料上统计、合并，产出一张<strong>合并规则表</strong>（以及最终词表）。这个过程只做一次，可能花几小时到几天。</li>
+<li><strong>编码（encoding）</strong>：拿训练好的规则表，把新文本切成 token。这个过程必须很快，每次请求都要做。</li>
+</ul>
+<p>编码时按<strong>合并发生的先后顺序</strong>依次尝试。先学的合并优先级高，因为它对应的片段更常见。这也是为什么同一个词在不同上下文里可能切法不同——分词器只认规则，不认语义。</p>
+<h2 id="四、手撕一个-BPE（纯-Python，一百来行）"><a href="#四、手撕一个-BPE（纯-Python，一百来行）" class="headerlink" title="四、手撕一个 BPE（纯 Python，一百来行）"></a>四、手撕一个 BPE（纯 Python，一百来行）</h2><p>下面这段代码不依赖任何第三方库，直接可跑。它包含 BPE 的全部核心：预切分、统计、合并、编码。</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">def</span> <span class="title function_">get_stats</span>(<span class="params">ids, counts=<span class="literal">None</span></span>):</span><br><span class="line">    <span class="string">&quot;&quot;&quot;统计相邻 token 对的出现次数&quot;&quot;&quot;</span></span><br><span class="line">    counts = &#123;&#125; <span class="keyword">if</span> counts <span class="keyword">is</span> <span class="literal">None</span> <span class="keyword">else</span> counts</span><br><span class="line">    <span class="keyword">for</span> pair <span class="keyword">in</span> <span class="built_in">zip</span>(ids, ids[<span class="number">1</span>:]):</span><br><span class="line">        counts[pair] = counts.get(pair, <span class="number">0</span>) + <span class="number">1</span></span><br><span class="line">    <span class="keyword">return</span> counts</span><br><span class="line"></span><br><span class="line"><span class="keyword">def</span> <span class="title function_">merge</span>(<span class="params">ids, pair, idx</span>):</span><br><span class="line">    <span class="string">&quot;&quot;&quot;把 ids 中所有 pair 替换成新编号 idx&quot;&quot;&quot;</span></span><br><span class="line">    newids = []</span><br><span class="line">    i = <span class="number">0</span></span><br><span class="line">    <span class="keyword">while</span> i &lt; <span class="built_in">len</span>(ids):</span><br><span class="line">        <span class="keyword">if</span> i &lt; <span class="built_in">len</span>(ids) - <span class="number">1</span> <span class="keyword">and</span> ids[i] == pair[<span class="number">0</span>] <span class="keyword">and</span> ids[i + <span class="number">1</span>] == pair[<span class="number">1</span>]:</span><br><span class="line">            newids.append(idx)</span><br><span class="line">            i += <span class="number">2</span></span><br><span class="line">        <span class="keyword">else</span>:</span><br><span class="line">            newids.append(ids[i])</span><br><span class="line">            i += <span class="number">1</span></span><br><span class="line">    <span class="keyword">return</span> newids</span><br></pre></td></tr></table></figure>
+
+<p>训练循环。这里先做一个简单的<strong>预切分</strong>：用正则把连续的文字和标点分别切开，BPE 只在块内合并，避免出现”<code>。大模型</code>“这种跨标点的怪 token。（GPT-2 的正式实现也有一层正则预切分，规则更细。）</p>
+<p>为了简单，这个正则把空格丢掉了；真实分词器会把空格也编码进 token（GPT-2 用 <code>Ġ</code> 表示前导空格），所以”空格也是 token”不是玩笑。</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">import</span> re</span><br><span class="line"></span><br><span class="line">corpus = <span class="string">&quot;大模型是人工智能领域的重要成果。大模型可以理解语言、生成文本、回答问题。...&quot;</span></span><br><span class="line">chunks = re.findall(<span class="string">r&quot;\w+|[^\w\s]&quot;</span>, corpus)  <span class="comment"># 标点单独成块</span></span><br><span class="line"></span><br><span class="line">chars = <span class="built_in">sorted</span>(<span class="built_in">set</span>(corpus))                 <span class="comment"># 初始词表：所有出现过的字符</span></span><br><span class="line">stoi = &#123;c: i <span class="keyword">for</span> i, c <span class="keyword">in</span> <span class="built_in">enumerate</span>(chars)&#125;</span><br><span class="line">itos = &#123;i: c <span class="keyword">for</span> c, i <span class="keyword">in</span> stoi.items()&#125;</span><br><span class="line"></span><br><span class="line">chunk_ids = [[stoi[c] <span class="keyword">for</span> c <span class="keyword">in</span> chunk] <span class="keyword">for</span> chunk <span class="keyword">in</span> chunks]  <span class="comment"># 每块一个 id 序列</span></span><br><span class="line">merges = &#123;&#125;</span><br><span class="line"></span><br><span class="line"><span class="keyword">for</span> i <span class="keyword">in</span> <span class="built_in">range</span>(<span class="number">40</span>):                         <span class="comment"># 做 40 次合并</span></span><br><span class="line">    stats = &#123;&#125;</span><br><span class="line">    <span class="keyword">for</span> ids <span class="keyword">in</span> chunk_ids:</span><br><span class="line">        get_stats(ids, stats)               <span class="comment"># 统计所有块里的相邻对</span></span><br><span class="line">    pair = <span class="built_in">max</span>(stats, key=stats.get)        <span class="comment"># 选出现最多的相邻对</span></span><br><span class="line">    <span class="keyword">if</span> stats[pair] &lt; <span class="number">2</span>:</span><br><span class="line">        <span class="keyword">break</span>                               <span class="comment"># 没有重复片段了，停</span></span><br><span class="line">    new_id = <span class="built_in">len</span>(itos)</span><br><span class="line">    itos[new_id] = itos[pair[<span class="number">0</span>]] + itos[pair[<span class="number">1</span>]]</span><br><span class="line">    chunk_ids = [merge(ids, pair, new_id) <span class="keyword">for</span> ids <span class="keyword">in</span> chunk_ids]</span><br><span class="line">    merges[pair] = new_id</span><br></pre></td></tr></table></figure>
+
+<p>编码时也要做同样的预切分：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">def</span> <span class="title function_">encode</span>(<span class="params">text</span>):</span><br><span class="line">    ids = []</span><br><span class="line">    <span class="keyword">for</span> chunk <span class="keyword">in</span> re.findall(<span class="string">r&quot;\w+|[^\w\s]&quot;</span>, text):</span><br><span class="line">        part = [stoi[c] <span class="keyword">for</span> c <span class="keyword">in</span> chunk]</span><br><span class="line">        <span class="keyword">while</span> <span class="built_in">len</span>(part) &gt;= <span class="number">2</span>:</span><br><span class="line">            stats = get_stats(part)</span><br><span class="line">            <span class="comment"># 在统计到的相邻对里，找&quot;最早被合并&quot;的那一个</span></span><br><span class="line">            pair = <span class="built_in">min</span>(stats, key=<span class="keyword">lambda</span> p: merges.get(p, <span class="built_in">float</span>(<span class="string">&quot;inf&quot;</span>)))</span><br><span class="line">            <span class="keyword">if</span> pair <span class="keyword">not</span> <span class="keyword">in</span> merges:</span><br><span class="line">                <span class="keyword">break</span></span><br><span class="line">            part = merge(part, pair, merges[pair])</span><br><span class="line">        ids.extend(part)</span><br><span class="line">    <span class="keyword">return</span> ids</span><br></pre></td></tr></table></figure>
+
+<p>在一段 157 字的中文语料上跑，真实输出是：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br></pre></td><td class="code"><pre><span class="line">语料: 157 个字符 -&gt; 31 个预切分块，初始 token 数: 156，字符词表: 86</span><br><span class="line">  合并 # 1: &#x27;模&#x27; + &#x27;型&#x27; -&gt; &#x27;模型&#x27;</span><br><span class="line">  合并 # 2: &#x27;大&#x27; + &#x27;模型&#x27; -&gt; &#x27;大模型&#x27;</span><br><span class="line">  合并 # 3: &#x27;理&#x27; + &#x27;解&#x27; -&gt; &#x27;理解&#x27;</span><br><span class="line">  合并 # 4: &#x27;语&#x27; + &#x27;言&#x27; -&gt; &#x27;语言&#x27;</span><br><span class="line">  合并 # 5: &#x27;我&#x27; + &#x27;们&#x27; -&gt; &#x27;我们&#x27;</span><br><span class="line">  合并 # 6: &#x27;大模型&#x27; + &#x27;的&#x27; -&gt; &#x27;大模型的&#x27;</span><br><span class="line">  合并 # 7: &#x27;数&#x27; + &#x27;据&#x27; -&gt; &#x27;数据&#x27;</span><br><span class="line">  合并 # 8: &#x27;计&#x27; + &#x27;算&#x27; -&gt; &#x27;计算&#x27;</span><br><span class="line">  合并 # 9: &#x27;文&#x27; + &#x27;字&#x27; -&gt; &#x27;文字&#x27;</span><br><span class="line">合并 9 次后：token 数 126，平均 1.25 字符/token</span><br><span class="line"></span><br><span class="line">大模型可以理解语言。  (10 字) -&gt; 6 个 token: [&#x27;大模型&#x27;, &#x27;可&#x27;, &#x27;以&#x27;, &#x27;理解&#x27;, &#x27;语言&#x27;, &#x27;。&#x27;]</span><br><span class="line">人工智能  (4 字) -&gt; 4 个 token: [&#x27;人&#x27;, &#x27;工&#x27;, &#x27;智&#x27;, &#x27;能&#x27;]</span><br></pre></td></tr></table></figure>
+
+<p>只有 9 次合并，是因为语料太小，大部分相邻对只出现一次，不满足”至少出现 2 次”的条件。<strong>真实分词器会在几十 GB 到几 TB 的语料上做几万到几十万次合并</strong>，所以能学出 <code>ation</code>、<code>ization</code>、<code>大模型</code>、<code>人工智能</code> 这种长片段。</p>
+<p>这段代码还有一个隐藏问题：<code>stoi</code> 只包含语料里出现过的字符。如果来一个没见过的字（比如语料里没有”春”），编码会直接报 <code>KeyError</code>。这正说明了字符级词表的死穴——<strong>世界上的字符是开放的，而词表是封闭的</strong>。解决方案就是下一节的字节级 BPE。</p>
+<h2 id="五、字节级-BPE：让词表覆盖”一切”"><a href="#五、字节级-BPE：让词表覆盖”一切”" class="headerlink" title="五、字节级 BPE：让词表覆盖”一切”"></a>五、字节级 BPE：让词表覆盖”一切”</h2><p>GPT-2 的天才之处，是把 BPE 的基本单位从”字符”换成了”字节”。</p>
+<p>任何文本（中文、日文、阿拉伯文、emoji、二进制乱码）都可以用 UTF-8 编码成字节序列，而字节只有 0~255 共 256 种。于是：</p>
+<ol>
+<li>初始词表固定为 256 个字节，<strong>永远不会 OOV</strong>；</li>
+<li>在这个基础上做 BPE 合并，学出常见字节组合；</li>
+<li>一个汉字在 UTF-8 里通常占 3 个字节，如果它很常见，会被合并成一个或几个 token；如果很生僻，就保留成 2~3 个字节 token。</li>
+</ol>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">&quot;大&quot; 的 UTF-8 字节: E5 A4 A7   -&gt; 初始 3 个 token</span><br><span class="line">常见之后可能被合并: [E5A4A7] -&gt; 1 个 token</span><br><span class="line">&quot;𠮷&quot;（生僻字）: 4 个字节 -&gt; 可能拆成 2~4 个 token</span><br></pre></td></tr></table></figure>
+
+<p>这就是为什么 GPT 系列”什么都能读”，连乱码和表情符号都不会报错。代价是：<strong>分词结果不再直观</strong>，一个 token 可能只是半个汉字（字节不完整），所以你不能简单地用字符串长度去估算 token 数。</p>
+<p>GPT-2 的词表大小是 50257，GPT-4 用的 <code>cl100k_base</code> 约 10 万，GPT-4o 的 <code>o200k_base</code> 约 20 万，LLaMA 1&#x2F;2 约 3.2 万，LLaMA 3 约 12.8 万，Qwen 系列约 15 万。词表越大，同样文本的 token 数越少，但嵌入矩阵也越大。</p>
+<h3 id="5-1-词表大小是一笔账"><a href="#5-1-词表大小是一笔账" class="headerlink" title="5.1 词表大小是一笔账"></a>5.1 词表大小是一笔账</h3><p>Transformer 里，token 嵌入矩阵的形状是 <code>词表大小 × 隐藏维度</code>。假设 <code>d_model = 4096</code>：</p>
+<table>
+<thead>
+<tr>
+<th>词表大小</th>
+<th>嵌入参数量</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>32,000</td>
+<td>1.31 亿</td>
+<td>LLaMA 级别，省参数</td>
+</tr>
+<tr>
+<td>100,000</td>
+<td>4.10 亿</td>
+<td>GPT-4 级别</td>
+</tr>
+<tr>
+<td>200,000</td>
+<td>8.19 亿</td>
+<td>多语言友好，但参数翻倍</td>
+</tr>
+</tbody></table>
+<p>而且输出层通常和嵌入层<strong>共享权重</strong>（weight tying），所以这个矩阵只存一份。但即便如此，词表从 3 万涨到 20 万，也要多出近 7 亿参数——对 7B 模型来说不是小数目。</p>
+<p>另一个隐性成本是** softmax 的计算量**：每生成一个 token，都要在词表维度上做一次 softmax。词表越大，这一步越慢。所以词表大小是”压缩率”和”计算成本”之间的权衡。</p>
+<h3 id="5-2-为什么中文更”费-token”"><a href="#5-2-为什么中文更”费-token”" class="headerlink" title="5.2 为什么中文更”费 token”"></a>5.2 为什么中文更”费 token”</h3><p>现代分词器的训练语料以英文为主，英文的高频片段（<code>the</code>、<code>ing</code>、<code>tion</code>、<code>http</code>）被充分合并，一个 token 能装下好几个字母。中文的合并次数相对少，很多汉字只能以 1~2 个 token 表示。</p>
+<p>一个粗略的经验值（不同分词器差异很大）：</p>
+<table>
+<thead>
+<tr>
+<th>内容</th>
+<th>大约 token 数</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>1000 个英文单词</td>
+<td>1300 ~ 1500</td>
+</tr>
+<tr>
+<td>1000 个汉字</td>
+<td>1000 ~ 2000</td>
+</tr>
+<tr>
+<td>1000 个数字</td>
+<td>300 ~ 1000（取决于切分策略）</td>
+</tr>
+<tr>
+<td>1000 个 emoji</td>
+<td>1000 ~ 3000</td>
+</tr>
+</tbody></table>
+<p>所以”上下文窗口 128k”不等于”能放 128k 个汉字”。用之前先估一下，别等报错才发现超了。</p>
+<h2 id="六、主流分词器家族"><a href="#六、主流分词器家族" class="headerlink" title="六、主流分词器家族"></a>六、主流分词器家族</h2><p>BPE 不是唯一选择，但它是目前最主流的。几张表帮你认路。</p>
+<table>
+<thead>
+<tr>
+<th>分词器</th>
+<th>基本单位</th>
+<th>词表</th>
+<th>代表模型</th>
+<th>特点</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>BPE</strong></td>
+<td>字节&#x2F;字符</td>
+<td>3 万 ~ 20 万</td>
+<td>GPT 系列、LLaMA、Qwen</td>
+<td>高频片段优先，工程成熟</td>
+</tr>
+<tr>
+<td><strong>WordPiece</strong></td>
+<td>字符</td>
+<td>3 万左右</td>
+<td>BERT</td>
+<td>用似然而非频次选择合并，<code>##</code> 表示词中片段</td>
+</tr>
+<tr>
+<td><strong>SentencePiece</strong></td>
+<td>字符&#x2F;字节</td>
+<td>3 万 ~ 25 万</td>
+<td>T5、ALBERT、LLaMA</td>
+<td>把空格也当普通字符，语言无关</td>
+</tr>
+<tr>
+<td><strong>Unigram</strong></td>
+<td>子词</td>
+<td>3 万 ~ 25 万</td>
+<td>SentencePiece 的一种模式</td>
+<td>从大词表开始剪枝，概率建模</td>
+</tr>
+</tbody></table>
+<p>几个容易混淆的点：</p>
+<ul>
+<li><strong>BPE 和 WordPiece 都是子词算法</strong>，区别在”合并谁”：BPE 选频次最高的对，WordPiece 选能让语料似然提升最大的对；</li>
+<li><strong>SentencePiece 不是算法，是工具</strong>，它实现了 BPE 和 Unigram 两种模式，特点是”不依赖预分词”，直接把空格当字符处理，所以对中文、日文友好；</li>
+<li><strong>LLaMA 用的是 SentencePiece 的 BPE 模式</strong>，不是纯 GPT-2 字节级 BPE，但思想一脉相承。</li>
+</ul>
+<h2 id="七、特殊-token-与对话模板"><a href="#七、特殊-token-与对话模板" class="headerlink" title="七、特殊 token 与对话模板"></a>七、特殊 token 与对话模板</h2><p>除了普通文字，分词器还要处理一些”控制信号”，它们叫<strong>特殊 token（special tokens）</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>特殊 token</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>&lt;BOS&gt;</code> &#x2F; <code>&lt;s&gt;</code></td>
+<td>序列开始</td>
+</tr>
+<tr>
+<td><code>&lt;EOS&gt;</code> &#x2F; <code>&lt;/s&gt;</code></td>
+<td>序列结束，模型生成到它就停</td>
+</tr>
+<tr>
+<td><code>&lt;PAD&gt;</code></td>
+<td>批量推理时把短序列补齐</td>
+</tr>
+<tr>
+<td><code>&lt;UNK&gt;</code></td>
+<td>未知词（子词分词器一般不需要）</td>
+</tr>
+<tr>
+<td>&#96;&lt;</td>
+<td>im_start</td>
+</tr>
+<tr>
+<td>&#96;&lt;</td>
+<td>endoftext</td>
+</tr>
+</tbody></table>
+<p>现代聊天模型不是把”用户：你好\n助手：”直接当普通文本，而是有一套<strong>对话模板（chat template）</strong>：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">&lt;|im_start|&gt;system</span><br><span class="line">你是一个乐于助人的助手。&lt;|im_end|&gt;</span><br><span class="line">&lt;|im_start|&gt;user</span><br><span class="line">什么是 BPE？&lt;|im_end|&gt;</span><br><span class="line">&lt;|im_start|&gt;assistant</span><br></pre></td></tr></table></figure>
+
+<p>这些标记也是 token，也占上下文，也会计费。更关键的是：<strong>模板必须和模型训练时一致</strong>。用错了模板（比如该加 <code>&lt;|im_start|&gt;</code> 却没加），模型可能答非所问——它没见过这种格式。</p>
+<p>Hugging Face 的 <code>tokenizer.apply_chat_template()</code> 就是干这个的。自己拼字符串很容易漏掉空格、换行、结束符，能用官方模板就别手写。</p>
+<h3 id="7-1-训练时的-loss-mask"><a href="#7-1-训练时的-loss-mask" class="headerlink" title="7.1 训练时的 loss mask"></a>7.1 训练时的 loss mask</h3><p>做 SFT（监督微调）时，一条样本通常是”问题 + 回答”。我们只希望模型学习<strong>回答部分</strong>，不希望它学习复述问题。做法是把问题部分的标签设成 <code>-100</code>，交叉熵会忽略这些位置：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">labels = input_ids.clone()</span><br><span class="line">labels[:<span class="built_in">len</span>(prompt_ids)] = -<span class="number">100</span>   <span class="comment"># 只对回答部分计算 loss</span></span><br><span class="line">loss = F.cross_entropy(logits.view(-<span class="number">1</span>, vocab_size), labels.view(-<span class="number">1</span>), ignore_index=-<span class="number">100</span>)</span><br></pre></td></tr></table></figure>
+
+<p>这也是为什么”token 数”和”训练 token 数”要分清：计费按全部 token，但 loss 可能只算一部分。</p>
+<h2 id="八、工程实践：六个-token-坑"><a href="#八、工程实践：六个-token-坑" class="headerlink" title="八、工程实践：六个 token 坑"></a>八、工程实践：六个 token 坑</h2><h3 id="坑-1：用-len-text-估算-token-数"><a href="#坑-1：用-len-text-估算-token-数" class="headerlink" title="坑 1：用 len(text) 估算 token 数"></a>坑 1：用 <code>len(text)</code> 估算 token 数</h3><p>绝对不要。中文、英文、代码、emoji 的压缩率完全不同。正确做法是用对应模型的 tokenizer 实际编码：</p>
+<figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment"># Hugging Face</span></span><br><span class="line">ids = tokenizer.encode(text)</span><br><span class="line"></span><br><span class="line"><span class="comment"># OpenAI</span></span><br><span class="line"><span class="keyword">import</span> tiktoken</span><br><span class="line">enc = tiktoken.encoding_for_model(<span class="string">&quot;gpt-4o&quot;</span>)</span><br><span class="line">ids = enc.encode(text)</span><br></pre></td></tr></table></figure>
+
+<p>如果只是粗略估算，可以按”中文 1 字 ≈ 1.5 token、英文 1 词 ≈ 1.3 token”心算，但别拿它做预算。</p>
+<h3 id="坑-2：以为-token-边界等于语义边界"><a href="#坑-2：以为-token-边界等于语义边界" class="headerlink" title="坑 2：以为 token 边界等于语义边界"></a>坑 2：以为 token 边界等于语义边界</h3><p><code>大模型</code> 可能是一个 token，也可能是 <code>大</code> + <code>模型</code>，取决于上下文和分词器版本。模型看到的序列不同，行为可能有细微差异。这也是为什么”改一个标点，输出就变了”。</p>
+<h3 id="坑-3：混用不同模型的-tokenizer"><a href="#坑-3：混用不同模型的-tokenizer" class="headerlink" title="坑 3：混用不同模型的 tokenizer"></a>坑 3：混用不同模型的 tokenizer</h3><p>每个模型的词表不同，token id 不能跨模型通用。把 LLaMA 的 token id 喂给 Qwen，得到的是乱码。保存训练数据时，要么存原始文本，要么存对应模型的 tokenizer 版本号。</p>
+<h3 id="坑-4：忽略特殊-token-的计费"><a href="#坑-4：忽略特殊-token-的计费" class="headerlink" title="坑 4：忽略特殊 token 的计费"></a>坑 4：忽略特殊 token 的计费</h3><p>系统提示、对话模板、工具调用格式、图片占位符，全都是 token。一个复杂 Agent 的系统提示可能就有几千 token，每轮对话都要重复计费。<strong>能缓存就缓存，能精简就精简。</strong></p>
+<h3 id="坑-5：中文标点与全半角"><a href="#坑-5：中文标点与全半角" class="headerlink" title="坑 5：中文标点与全半角"></a>坑 5：中文标点与全半角</h3><p><code>，</code> 和 <code>,</code>、<code>。</code> 和 <code>.</code> 是完全不同的 token。用户输入里混用全半角，可能导致检索、匹配、缓存全部失效。做数据处理时先统一。</p>
+<h3 id="坑-6：以为换分词器不用重训"><a href="#坑-6：以为换分词器不用重训" class="headerlink" title="坑 6：以为换分词器不用重训"></a>坑 6：以为换分词器不用重训</h3><p>分词器一变，token id 全变，嵌入矩阵对不上，模型必须从头训练（或至少重新初始化嵌入层并继续预训练）。所以分词器一旦定下，通常整个模型生命周期都不换。</p>
+<h2 id="九、常见疑问"><a href="#九、常见疑问" class="headerlink" title="九、常见疑问"></a>九、常见疑问</h2><p><strong>Q1：BPE 合并多少次才够？</strong><br>没有标准答案。合并次数决定词表大小，词表大小要和模型规模、语料规模匹配。经验上，几十 GB 语料配 3 万<del>5 万词表，多语言大模型用 10 万</del>25 万。合并太多会导致词表里塞满长尾片段，浪费参数；太少则序列过长。</p>
+<p><strong>Q2：为什么不用”最常用的 10 万个词”直接做词表？</strong><br>因为词的形态是开放的。中文有新词，英文有屈折变化，代码有任意标识符。固定词表必然遇到 OOV，而子词分词可以把任何新词拆成已知片段。</p>
+<p><strong>Q3：一个 token 到底对应多少字？</strong><br>没有固定答案。英文大约 4 个字符，中文大约 1~2 个字符，代码和数字更碎。唯一可靠的办法是用目标模型的 tokenizer 实测。</p>
+<p><strong>Q4：分词器会影响模型智商吗？</strong><br>会，而且影响不小。同样的内容，token 数越少，模型在固定上下文里能”看到”的信息越多，注意力也越集中；token 切得太碎，模型要花更多层去拼装语义。这就是为什么多语言模型要专门扩词表、做词表平衡。</p>
+<p><strong>Q5：我自己微调，需要改分词器吗？</strong><br>一般不需要。除非你要加一种模型完全没见过的语言、大量领域专有符号（比如某种化学式），才考虑扩词表。扩词表后要重新初始化新 token 的嵌入，并用大量语料继续训练，否则新 token 等于噪声。</p>
+<h2 id="十、总结"><a href="#十、总结" class="headerlink" title="十、总结"></a>十、总结</h2><p>把这一篇压缩成一张图：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">原始文本</span><br><span class="line">  → 预切分（按文字/标点切开）</span><br><span class="line">  → 字节编码（UTF-8，256 个基础字节）</span><br><span class="line">  → BPE 合并（按学到的规则，反复合并高频对）</span><br><span class="line">  → token id 序列</span><br><span class="line">  → 模型</span><br></pre></td></tr></table></figure>
+
+<p>记住四句话：</p>
+<ol>
+<li><strong>大模型不认字，只认 token</strong>；token 是它世界的原子。</li>
+<li><strong>BPE 的本质是”高频合并、低频拆分”</strong>，用一个可控大小的词表覆盖开放世界。</li>
+<li><strong>字节级 BPE 保证永不 OOV</strong>，代价是 token 边界不直观。</li>
+<li><strong>token 数决定成本、速度和上下文</strong>，别用字符数拍脑袋。</li>
+</ol>
+<p>动手建议：</p>
+<ol>
+<li>把第四节的代码跑一遍，改改语料和合并次数，观察词表和切分结果怎么变；</li>
+<li>用你常用模型的 tokenizer，把同一段中文、英文、代码各编码一次，对比 token 数；</li>
+<li>找一段带 emoji 和生僻字的文本，看看字节级分词器怎么处理；</li>
+<li>打印一条真实对话的 <code>apply_chat_template</code> 结果，看看特殊 token 长什么样。</li>
+</ol>
+<p>下一篇我们聊<strong>采样</strong>：模型输出的是整个词表上的概率分布，为什么同一个问题每次回答都不一样？温度、Top-k、Top-p 到底在调什么？我们会用一个纯 Python 的小实验，把”保守”和”发疯”调到肉眼可见。</p>
+<hr>
+<p><strong>本系列其他文章：</strong></p>
+<ul>
+<li><a href="/2026/10/23/mini-gpt-from-scratch/" title="手撕迷你 GPT（逐行代码）：从&quot;预测下一个字&quot;到会写句子">手撕迷你 GPT：从预测下一个字到会写句子</a></li>
+<li><a href="/2026/10/28/llm-sampling-decoding/" title="温度、Top-k 与 Top-p：大模型是怎么&quot;挑词&quot;的">温度、Top-k 与 Top-p：大模型是怎么&quot;挑词&quot;的</a></li>
+<li><a href="/2026/10/30/llm-training-pipeline/" title="大模型是怎么炼成的：预训练、SFT 与对齐">大模型是怎么炼成的：预训练、SFT 与对齐</a></li>
+<li><a href="/2026/11/01/context-window-kv-cache/" title="上下文窗口与 KV Cache：大模型的&quot;记忆&quot;为什么又贵又短">上下文窗口与 KV Cache：大模型的记忆为什么又贵又短</a></li>
+<li><a href="/2026/11/02/llm-hallucination-rag/" title="大模型为什么会胡说八道：幻觉、知识截止与 RAG">大模型为什么会胡说八道：幻觉与 RAG</a></li>
+</ul>
+</article><div class="post-copyright"><div class="post-copyright__author"><span class="post-copyright-meta"><i class="fas fa-circle-user fa-fw"></i>文章作者: </span><span class="post-copyright-info"><a href="https://chenhui05.github.io">CHENHUI</a></span></div><div class="post-copyright__type"><span class="post-copyright-meta"><i class="fas fa-square-arrow-up-right fa-fw"></i>文章链接: </span><span class="post-copyright-info"><a href="https://chenhui05.github.io/2026/10/26/tokenizer-bpe-explained/">https://chenhui05.github.io/2026/10/26/tokenizer-bpe-explained/</a></span></div><div class="post-copyright__notice"><span class="post-copyright-meta"><i class="fas fa-circle-exclamation fa-fw"></i>版权声明: </span><span class="post-copyright-info">本博客所有文章除特别声明外，均采用 <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/" target="_blank">CC BY-NC-SA 4.0</a> 许可协议。转载请注明来源 <a href="https://chenhui05.github.io" target="_blank">CHENHUI的博客</a>！</span></div></div><div class="tag_share"><div class="post-meta__tag-list"><a class="post-meta__tags" href="/tags/NLP/">NLP</a><a class="post-meta__tags" href="/tags/%E5%A4%A7%E6%A8%A1%E5%9E%8B%E5%9F%BA%E7%A1%80/">大模型基础</a><a class="post-meta__tags" href="/tags/%E5%A4%A7%E6%A8%A1%E5%9E%8B/">大模型</a><a class="post-meta__tags" href="/tags/Tokenizer/">Tokenizer</a><a class="post-meta__tags" href="/tags/BPE/">BPE</a></div><div class="post-share"><div class="social-share" data-image="/img/avatar.jpg" data-sites="facebook,x,wechat,weibo,qq"></div><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/butterfly-extsrc@1.1.6/sharejs/dist/css/share.min.css" media="print" onload="this.media='all'"><script src="https://cdn.jsdelivr.net/npm/butterfly-extsrc@1.1.6/sharejs/dist/js/social-share.min.js" defer></script></div></div><nav class="pagination-post" id="pagination"><a class="pagination-related" href="/2026/10/28/llm-sampling-decoding/" title="温度、Top-k 与 Top-p：大模型是怎么&quot;挑词&quot;的"><div class="cover" style="background: var(--default-bg-color)"></div><div class="info"><div class="info-1"><div class="info-item-1">上一篇</div><div class="info-item-2">温度、Top-k 与 Top-p：大模型是怎么"挑词"的</div></div><div class="info-2"><div class="info-item-1">写在前面你有没有遇到过这种情况：  同一个问题问两遍，一次答得中规中矩，一次脑洞大开； 把 temperature 从 0.7 调到 1.2，模型突然开始胡言乱语； 明明设了 temperature=0，两次调用结果还是有细微差别； 写代码时希望它稳定，写文案时希望它活泼，却不知道参数该怎么配。  这些都不是玄学，而是**解码策略（decoding strategy）**在起作用。 大模型每生成一个 token，输出的不是一个确定的词，而是整个词表上的一个概率分布。从”分布”到”最终选哪个词”，中间那一步就是采样。温度、Top-k、Top-p 都是在对这个分布做手术。 这一篇我们把手术刀拆开：  logits 和 softmax 到底算出了什么； 贪心、温度、Top-k、Top-p 分别在改什么； 用真实数字看温度如何把分布”压尖”或”摊平”； 用 30 行纯 Python 写一个二元语言模型，亲眼看到”保守”和”发疯”的差别； 不同任务到底该怎么配参数。  这是「大模型基础」系列的第三篇。前两篇分别手撕了迷你 GPT 和 Tokenizer，这一篇接着讲：模型吐出概率之后，发生...</div></div></div></a><a class="pagination-related" href="/2026/10/23/mini-gpt-from-scratch/" title="手撕迷你 GPT（逐行代码）：从&quot;预测下一个字&quot;到会写句子"><div class="cover" style="background: var(--default-bg-color)"></div><div class="info text-right"><div class="info-1"><div class="info-item-1">下一篇</div><div class="info-item-2">手撕迷你 GPT（逐行代码）：从"预测下一个字"到会写句子</div></div><div class="info-2"><div class="info-item-1">写在前面上一篇《手撕 Transformer》的结尾，我留了一句话：  进阶挑战：把 Encoder 去掉，只用 Decoder 实现一个迷你 GPT。  这一篇就来还债。 我们要从零写出一个 0.87M 参数的字符级 GPT：4 层、128 维、4 个注意力头、上下文 64 个字符。在一台普通 CPU 上训练 3 分钟，它就能写出这样的句子： 1234567春眠不觉晓，处处闻啼鸟。夜来风雨声，花落知多少。登鹳雀楼王之涣白日依山尽，黄河入海流。欲穷千里目，更上一层楼。  看起来很惊艳，对吧？ 但我要先剧透：它不是在写诗，它是在背诗。 训练 loss 降到 0.03，验证 loss 却高达 12.9——这是教科书级的过拟合。本文会把这个”翻车现场”完整展示给你，因为理解它为什么翻车，比看它写出诗更重要。 这一篇你会学到：  GPT 和上一篇的 Transformer 到底差在哪； “预测下一个字”如何变成训练信号； 因果自注意力、Pre-LN、残差、权重共享，每个零件为什么存在； 一个完整 GPT 的训练和生成代码； 为什么小数据上的”惊艳效果”往往是记忆，而不是智能。  完整可运...</div></div></div></a></nav><div class="relatedPosts"><div class="headline"><i class="fas fa-thumbs-up fa-fw"></i><span>相关推荐</span></div><div class="relatedPosts-list"><a class="pagination-related" href="/2026/11/01/context-window-kv-cache/" title="上下文窗口与 KV Cache：大模型的&quot;记忆&quot;为什么又贵又短"><div class="cover" style="background: var(--default-bg-color)"></div><div class="info text-center"><div class="info-1"><div class="info-item-1"><i class="far fa-calendar-alt fa-fw"></i> 2026-11-01</div><div class="info-item-2">上下文窗口与 KV Cache：大模型的&quot;记忆&quot;为什么又贵又短</div></div><div class="info-2"><div class="info-item-1">写在前面模型厂商的宣传页上，”128k 上下文””1M 超长上下文”的字样越来越常见。听起来像是：只要把整本书塞进去，模型就能全部记住、全部理解。 但真正用过的人会发现问题：  塞进去 10 万字，首 token 要等十几秒； 明明资料就在中间，模型却答”文中没有提到”； 开两个长对话，显卡显存就爆了； 同一个模型，8k 上下文很聪明，128k 上下文反而变笨。  这些现象指向大模型架构里两个绕不开的关键词：上下文窗口（context window） 和 KV Cache。 这一篇我们不讲虚的，直接从公式和真实数字出发，回答四个问题：  上下文窗口到底是什么，为什么不能无限大？ 为什么长上下文又慢又贵？钱花在哪了？ KV Cache 是什么，一个 token 到底占多少显存？ “长上下文”和”真记住”是一回事吗？什么时候该用 RAG？  这是「大模型基础」系列的第五篇。前面我们讲了 token、GPT 结构、采样和训练；这一篇讲推理阶段最现实的约束：显存和算力。   一、上下文窗口：模型的工作台，不是硬盘1.1 它到底是什么上下文窗口指的是：模型在一次请求中能处理的最大 toke...</div></div></div></a><a class="pagination-related" href="/2026/10/28/llm-sampling-decoding/" title="温度、Top-k 与 Top-p：大模型是怎么&quot;挑词&quot;的"><div class="cover" style="background: var(--default-bg-color)"></div><div class="info text-center"><div class="info-1"><div class="info-item-1"><i class="far fa-calendar-alt fa-fw"></i> 2026-10-28</div><div class="info-item-2">温度、Top-k 与 Top-p：大模型是怎么&quot;挑词&quot;的</div></div><div class="info-2"><div class="info-item-1">写在前面你有没有遇到过这种情况：  同一个问题问两遍，一次答得中规中矩，一次脑洞大开； 把 temperature 从 0.7 调到 1.2，模型突然开始胡言乱语； 明明设了 temperature=0，两次调用结果还是有细微差别； 写代码时希望它稳定，写文案时希望它活泼，却不知道参数该怎么配。  这些都不是玄学，而是**解码策略（decoding strategy）**在起作用。 大模型每生成一个 token，输出的不是一个确定的词，而是整个词表上的一个概率分布。从”分布”到”最终选哪个词”，中间那一步就是采样。温度、Top-k、Top-p 都是在对这个分布做手术。 这一篇我们把手术刀拆开：  logits 和 softmax 到底算出了什么； 贪心、温度、Top-k、Top-p 分别在改什么； 用真实数字看温度如何把分布”压尖”或”摊平”； 用 30 行纯 Python 写一个二元语言模型，亲眼看到”保守”和”发疯”的差别； 不同任务到底该怎么配参数。  这是「大模型基础」系列的第三篇。前两篇分别手撕了迷你 GPT 和 Tokenizer，这一篇接着讲：模型吐出概率之后，发生...</div></div></div></a><a class="pagination-related" href="/2026/11/02/llm-hallucination-rag/" title="大模型为什么会胡说八道：幻觉、知识截止与 RAG"><div class="cover" style="background: var(--default-bg-color)"></div><div class="info text-center"><div class="info-1"><div class="info-item-1"><i class="far fa-calendar-alt fa-fw"></i> 2026-11-02</div><div class="info-item-2">大模型为什么会胡说八道：幻觉、知识截止与 RAG</div></div><div class="info-2"><div class="info-item-1">写在前面我见过最离谱的一次：让某模型推荐几篇”关于大模型幻觉”的论文，它一口气给了五篇，标题、作者、年份、期刊全都像模像样——但没有一篇真实存在。 更麻烦的是，它说得很自信。没有”可能””大概”，没有犹豫，甚至连引用格式都给你排好了。你如果不去查，根本发现不了。 这就是幻觉（Hallucination）：模型生成了流畅、自信、但不符合事实或没有依据的内容。 很多人把它当成”模型还不够强”的 bug，等下一代就好了。但这一篇想告诉你：  幻觉不是偶然的故障，而是”预测下一个 token”这个训练目标的结构性副产品。它不会消失，只能被管理。  我们会讲清楚：  幻觉分哪两种，各自怎么产生； 为什么模型”不知道自己不知道”； RAG 到底怎么接，为什么它不能包治百病； 用 100 行纯 Python 手撕一个迷你检索系统，跑通”检索—增强—生成”的骨架； 怎么评估一个 RAG 系统到底靠不靠谱。  这是「大模型基础」系列的第六篇，也是最后一篇。前面讲了模型怎么读字、怎么生成、怎么训练、记忆为什么贵；这一篇讲它最常被诟病的毛病，以及工程上的应对。   一、幻觉的两种类型学术界通常把幻觉分...</div></div></div></a><a class="pagination-related" href="/2026/10/30/llm-training-pipeline/" title="大模型是怎么炼成的：预训练、SFT 与对齐"><div class="cover" style="background: var(--default-bg-color)"></div><div class="info text-center"><div class="info-1"><div class="info-item-1"><i class="far fa-calendar-alt fa-fw"></i> 2026-10-30</div><div class="info-item-2">大模型是怎么炼成的：预训练、SFT 与对齐</div></div><div class="info-2"><div class="info-item-1">写在前面你下载了一个开源大模型，兴冲冲地输入”你好，请介绍一下你自己”，结果它回： 1你好，请介绍一下你自己的名字、年龄、职业、兴趣爱好……  它不是在回答你，而是在续写你的问题。这就是基座模型（base model）——一个只会”接话”的文本续写器。 而 ChatGPT、DeepSeek、Claude 这些产品里的模型，会礼貌地回答你、拒绝有害请求、按格式输出 JSON。它们和基座模型之间，隔着三道关键工序：  预训练（Pre-training）：读遍海量文本，学会”下一个 token 是什么”； 监督微调（SFT）：学会”按照指令回答”，而不是自顾自续写； 偏好对齐（RLHF &#x2F; DPO）：学会”什么样的回答更好”，更符合人类偏好。  这三步加起来，才是我们日常使用的”助手”。这一篇把整条流水线拆开，回答：  预训练到底在学什么？为什么”预测下一个词”能产生智能？ SFT 的数据长什么样？为什么只对回答部分算 loss？ RLHF 和 DPO 有什么区别？为什么需要”奖励模型”？ 推理模型（o1、R1 这一类）又多加了一步什么？  这是「大模型基础」系列的第四篇。前...</div></div></div></a><a class="pagination-related" href="/2026/10/23/mini-gpt-from-scratch/" title="手撕迷你 GPT（逐行代码）：从&quot;预测下一个字&quot;到会写句子"><div class="cover" style="background: var(--default-bg-color)"></div><div class="info text-center"><div class="info-1"><div class="info-item-1"><i class="far fa-calendar-alt fa-fw"></i> 2026-10-23</div><div class="info-item-2">手撕迷你 GPT（逐行代码）：从&quot;预测下一个字&quot;到会写句子</div></div><div class="info-2"><div class="info-item-1">写在前面上一篇《手撕 Transformer》的结尾，我留了一句话：  进阶挑战：把 Encoder 去掉，只用 Decoder 实现一个迷你 GPT。  这一篇就来还债。 我们要从零写出一个 0.87M 参数的字符级 GPT：4 层、128 维、4 个注意力头、上下文 64 个字符。在一台普通 CPU 上训练 3 分钟，它就能写出这样的句子： 1234567春眠不觉晓，处处闻啼鸟。夜来风雨声，花落知多少。登鹳雀楼王之涣白日依山尽，黄河入海流。欲穷千里目，更上一层楼。  看起来很惊艳，对吧？ 但我要先剧透：它不是在写诗，它是在背诗。 训练 loss 降到 0.03，验证 loss 却高达 12.9——这是教科书级的过拟合。本文会把这个”翻车现场”完整展示给你，因为理解它为什么翻车，比看它写出诗更重要。 这一篇你会学到：  GPT 和上一篇的 Transformer 到底差在哪； “预测下一个字”如何变成训练信号； 因果自注意力、Pre-LN、残差、权重共享，每个零件为什么存在； 一个完整 GPT 的训练和生成代码； 为什么小数据上的”惊艳效果”往往是记忆，而不是智能。  完整可运...</div></div></div></a><a class="pagination-related" href="/2026/10/19/transformer-from-scratch/" title="手撕 Transformer（逐行代码）：零基础也能看懂的完整实现"><div class="cover" style="background: var(--default-bg-color)"></div><div class="info text-center"><div class="info-1"><div class="info-item-1"><i class="far fa-calendar-alt fa-fw"></i> 2026-10-19</div><div class="info-item-2">手撕 Transformer（逐行代码）：零基础也能看懂的完整实现</div></div><div class="info-2"><div class="info-item-1">写在前面今天的大模型——ChatGPT、Gemini、DeepSeek、各种翻译软件——它们的骨架里都有同一个名字：Transformer。2017 年谷歌发表论文《Attention Is All You Need》之后，它几乎成了现代深度学习的通用结构。 很多人觉得 Transformer 玄乎其玄，Q、K、V、多头、掩码一堆名词看了就头大。但只要你把它亲手敲一遍，就会发现它每一个零件都在解决一个具体的问题，逻辑非常朴素。 这篇文章带你做三件事：  用大白话讲清楚 Transformer 的每一个零件是干什么的； 不调用任何现成的 Transformer 封装，只用 PyTorch 最基础的线性层，从零逐行写出完整模型； 训练它学会一个小任务——把数字串反转（输入 314159，输出 951413），亲眼看到 loss 下降、准确率上升。  前置知识几乎为零：你只需要知道”向量是一串数字””矩阵乘法是把表格按规则相乘”就够了。看不懂的地方先跳过，把代码跑起来，再回头看概念，会豁然开朗。 运行环境：装好 Python 和 PyTorch 即可（pip install torch...</div></div></div></a></div></div></div><div class="aside-content" id="aside-content"><div class="card-widget card-info text-center"><div class="avatar-img"><img src="/img/avatar.jpg" onerror="this.onerror=null;this.src='/img/friend_404.gif'" alt="avatar"/></div><div class="author-info-name">CHENHUI</div><div class="author-info-description">一个个人技术博客</div><div class="site-data"><a href="/archives/"><div class="headline">文章</div><div class="length-num">9</div></a><a href="/tags/"><div class="headline">标签</div><div class="length-num">27</div></a><a href="/categories/"><div class="headline">分类</div><div class="length-num">1</div></a></div><a id="card-info-btn" target="_blank" rel="noopener" href="https://github.com/CHENHUI05"><i class="fab fa-github"></i><span>Follow Me</span></a></div><div class="card-widget card-announcement"><div class="item-headline"><i class="fas fa-bullhorn fa-shake"></i><span>公告</span></div><div class="announcement_content">欢迎来到我的博客！</div></div><div class="sticky_layout"><div class="card-widget" id="card-toc"><div class="item-headline"><i class="fas fa-stream"></i><span>目录</span><span class="toc-percentage"></span></div><div class="toc-content"><ol class="toc"><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%86%99%E5%9C%A8%E5%89%8D%E9%9D%A2"><span class="toc-text">写在前面</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E4%B8%80%E3%80%81%E5%85%88%E7%9C%8B%E4%B8%89%E4%B8%AA%E7%9C%9F%E5%AE%9E%E5%9C%BA%E6%99%AF"><span class="toc-text">一、先看三个真实场景</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#1-1-%E5%9C%BA%E6%99%AF%E4%B8%80%EF%BC%9A%E5%90%8C%E4%B8%80%E4%B8%AA%E9%97%AE%E9%A2%98%EF%BC%8C%E4%B8%AD%E8%8B%B1%E6%96%87%E4%BB%B7%E6%A0%BC%E4%B8%8D%E5%90%8C"><span class="toc-text">1.1 场景一：同一个问题，中英文价格不同</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#1-2-%E5%9C%BA%E6%99%AF%E4%BA%8C%EF%BC%9A%E4%B8%BA%E4%BB%80%E4%B9%88%E6%A8%A1%E5%9E%8B%E6%95%B0%E4%B8%8D%E6%B8%85%E5%AD%97%E6%AF%8D"><span class="toc-text">1.2 场景二：为什么模型数不清字母</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#1-3-%E5%9C%BA%E6%99%AF%E4%B8%89%EF%BC%9A%E6%94%B9%E4%B8%80%E4%B8%AA%E7%A9%BA%E6%A0%BC%EF%BC%8C%E7%BC%93%E5%AD%98%E5%A4%B1%E6%95%88"><span class="toc-text">1.3 场景三：改一个空格，缓存失效</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E4%BA%8C%E3%80%81%E4%B8%89%E7%A7%8D%E5%88%87%E6%B3%95%EF%BC%9A%E5%AD%97%E7%AC%A6%E3%80%81%E8%AF%8D%E3%80%81%E5%AD%90%E8%AF%8D"><span class="toc-text">二、三种切法：字符、词、子词</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#2-1-%E6%8C%89%E5%AD%97%E7%AC%A6%E5%88%87%EF%BC%88Character-level%EF%BC%89"><span class="toc-text">2.1 按字符切（Character-level）</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#2-2-%E6%8C%89%E8%AF%8D%E5%88%87%EF%BC%88Word-level%EF%BC%89"><span class="toc-text">2.2 按词切（Word-level）</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#2-3-%E6%8C%89%E5%AD%90%E8%AF%8D%E5%88%87%EF%BC%88Subword-level%EF%BC%89"><span class="toc-text">2.3 按子词切（Subword-level）</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E4%B8%89%E3%80%81BPE%EF%BC%9A%E4%BB%8E%E5%AD%97%E7%AC%A6%E5%BC%80%E5%A7%8B%EF%BC%8C%E5%8F%8D%E5%A4%8D%E5%90%88%E5%B9%B6"><span class="toc-text">三、BPE：从字符开始，反复合并</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#3-1-%E4%B8%80%E4%B8%AA%E7%BB%8F%E5%85%B8%E7%9A%84%E7%8E%A9%E5%85%B7%E4%BE%8B%E5%AD%90"><span class="toc-text">3.1 一个经典的玩具例子</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#3-2-%E8%AE%AD%E7%BB%83%E5%92%8C%E7%BC%96%E7%A0%81%E6%98%AF%E4%B8%A4%E4%B8%AA%E9%98%B6%E6%AE%B5"><span class="toc-text">3.2 训练和编码是两个阶段</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%9B%9B%E3%80%81%E6%89%8B%E6%92%95%E4%B8%80%E4%B8%AA-BPE%EF%BC%88%E7%BA%AF-Python%EF%BC%8C%E4%B8%80%E7%99%BE%E6%9D%A5%E8%A1%8C%EF%BC%89"><span class="toc-text">四、手撕一个 BPE（纯 Python，一百来行）</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E4%BA%94%E3%80%81%E5%AD%97%E8%8A%82%E7%BA%A7-BPE%EF%BC%9A%E8%AE%A9%E8%AF%8D%E8%A1%A8%E8%A6%86%E7%9B%96%E2%80%9D%E4%B8%80%E5%88%87%E2%80%9D"><span class="toc-text">五、字节级 BPE：让词表覆盖”一切”</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#5-1-%E8%AF%8D%E8%A1%A8%E5%A4%A7%E5%B0%8F%E6%98%AF%E4%B8%80%E7%AC%94%E8%B4%A6"><span class="toc-text">5.1 词表大小是一笔账</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#5-2-%E4%B8%BA%E4%BB%80%E4%B9%88%E4%B8%AD%E6%96%87%E6%9B%B4%E2%80%9D%E8%B4%B9-token%E2%80%9D"><span class="toc-text">5.2 为什么中文更”费 token”</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%85%AD%E3%80%81%E4%B8%BB%E6%B5%81%E5%88%86%E8%AF%8D%E5%99%A8%E5%AE%B6%E6%97%8F"><span class="toc-text">六、主流分词器家族</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E4%B8%83%E3%80%81%E7%89%B9%E6%AE%8A-token-%E4%B8%8E%E5%AF%B9%E8%AF%9D%E6%A8%A1%E6%9D%BF"><span class="toc-text">七、特殊 token 与对话模板</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#7-1-%E8%AE%AD%E7%BB%83%E6%97%B6%E7%9A%84-loss-mask"><span class="toc-text">7.1 训练时的 loss mask</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%85%AB%E3%80%81%E5%B7%A5%E7%A8%8B%E5%AE%9E%E8%B7%B5%EF%BC%9A%E5%85%AD%E4%B8%AA-token-%E5%9D%91"><span class="toc-text">八、工程实践：六个 token 坑</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%9D%91-1%EF%BC%9A%E7%94%A8-len-text-%E4%BC%B0%E7%AE%97-token-%E6%95%B0"><span class="toc-text">坑 1：用 len(text) 估算 token 数</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%9D%91-2%EF%BC%9A%E4%BB%A5%E4%B8%BA-token-%E8%BE%B9%E7%95%8C%E7%AD%89%E4%BA%8E%E8%AF%AD%E4%B9%89%E8%BE%B9%E7%95%8C"><span class="toc-text">坑 2：以为 token 边界等于语义边界</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%9D%91-3%EF%BC%9A%E6%B7%B7%E7%94%A8%E4%B8%8D%E5%90%8C%E6%A8%A1%E5%9E%8B%E7%9A%84-tokenizer"><span class="toc-text">坑 3：混用不同模型的 tokenizer</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%9D%91-4%EF%BC%9A%E5%BF%BD%E7%95%A5%E7%89%B9%E6%AE%8A-token-%E7%9A%84%E8%AE%A1%E8%B4%B9"><span class="toc-text">坑 4：忽略特殊 token 的计费</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%9D%91-5%EF%BC%9A%E4%B8%AD%E6%96%87%E6%A0%87%E7%82%B9%E4%B8%8E%E5%85%A8%E5%8D%8A%E8%A7%92"><span class="toc-text">坑 5：中文标点与全半角</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#%E5%9D%91-6%EF%BC%9A%E4%BB%A5%E4%B8%BA%E6%8D%A2%E5%88%86%E8%AF%8D%E5%99%A8%E4%B8%8D%E7%94%A8%E9%87%8D%E8%AE%AD"><span class="toc-text">坑 6：以为换分词器不用重训</span></a></li></ol></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E4%B9%9D%E3%80%81%E5%B8%B8%E8%A7%81%E7%96%91%E9%97%AE"><span class="toc-text">九、常见疑问</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#%E5%8D%81%E3%80%81%E6%80%BB%E7%BB%93"><span class="toc-text">十、总结</span></a></li></ol></div></div><div class="card-widget card-recent-post"><div class="item-headline"><i class="fas fa-history"></i><span>最新文章</span></div><div class="aside-list"><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2026/11/02/llm-hallucination-rag/" title="大模型为什么会胡说八道：幻觉、知识截止与 RAG">大模型为什么会胡说八道：幻觉、知识截止与 RAG</a><time datetime="2026-11-02T13:00:00.000Z" title="发表于 2026-11-02 21:00:00">2026-11-02</time></div></div><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2026/11/01/context-window-kv-cache/" title="上下文窗口与 KV Cache：大模型的&quot;记忆&quot;为什么又贵又短">上下文窗口与 KV Cache：大模型的&quot;记忆&quot;为什么又贵又短</a><time datetime="2026-11-01T12:20:00.000Z" title="发表于 2026-11-01 20:20:00">2026-11-01</time></div></div><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2026/10/30/llm-training-pipeline/" title="大模型是怎么炼成的：预训练、SFT 与对齐">大模型是怎么炼成的：预训练、SFT 与对齐</a><time datetime="2026-10-30T13:10:00.000Z" title="发表于 2026-10-30 21:10:00">2026-10-30</time></div></div><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2026/10/28/llm-sampling-decoding/" title="温度、Top-k 与 Top-p：大模型是怎么&quot;挑词&quot;的">温度、Top-k 与 Top-p：大模型是怎么&quot;挑词&quot;的</a><time datetime="2026-10-28T12:40:00.000Z" title="发表于 2026-10-28 20:40:00">2026-10-28</time></div></div><div class="aside-list-item no-cover"><div class="content"><a class="title" href="/2026/10/26/tokenizer-bpe-explained/" title="大模型眼里的文字：手撕 Tokenizer 与 BPE 分词">大模型眼里的文字：手撕 Tokenizer 与 BPE 分词</a><time datetime="2026-10-26T13:00:00.000Z" title="发表于 2026-10-26 21:00:00">2026-10-26</time></div></div></div></div></div></div></main><footer id="footer"><div class="footer-other"><div class="footer-copyright"><span class="copyright">&copy;&nbsp;2025 - 2026 By CHENHUI</span></div></div></footer></div><div id="rightside"><div id="rightside-config-hide"><button id="readmode" type="button" title="阅读模式"><i class="fas fa-book-open"></i></button><button id="darkmode" type="button" title="日间和夜间模式切换"><i class="fas fa-adjust"></i></button><button id="hide-aside-btn" type="button" title="单栏和双栏切换"><i class="fas fa-arrows-alt-h"></i></button></div><div id="rightside-config-show"><button id="rightside-config" type="button" title="设置"><i class="fas fa-cog fa-spin"></i></button><button class="close" id="mobile-toc-button" type="button" title="目录"><i class="fas fa-list-ul"></i></button><button id="go-up" type="button" title="回到顶部"><span class="scroll-percent"></span><i class="fas fa-arrow-up"></i></button></div></div><div><script src="/js/utils.js?v=5.5.4"></script><script src="/js/main.js?v=5.5.4"></script><div class="js-pjax"><script>(() => {
+  const parseViewBox = viewBox => {
+    if (!viewBox) return null
+    const parts = viewBox.trim().split(/[\s,]+/).map(n => Number(n))
+    if (parts.length !== 4 || parts.some(n => Number.isNaN(n))) return null
+    return parts
+  }
+
+  const getSvgViewBox = svg => {
+    const attr = parseViewBox(svg.getAttribute('viewBox'))
+    if (attr) return attr
+
+    // Fallback: use bbox to build a viewBox
+    try {
+      const bbox = svg.getBBox()
+      if (bbox && bbox.width && bbox.height) return [bbox.x, bbox.y, bbox.width, bbox.height]
+    } catch (e) {
+      // getBBox may fail on some edge cases; ignore
+    }
+
+    const w = Number(svg.getAttribute('width')) || 0
+    const h = Number(svg.getAttribute('height')) || 0
+    if (w > 0 && h > 0) return [0, 0, w, h]
+    return [0, 0, 100, 100]
+  }
+
+  const setSvgViewBox = (svg, vb) => {
+    svg.setAttribute('viewBox', `${vb[0]} ${vb[1]} ${vb[2]} ${vb[3]}`)
+  }
+
+  const clamp = (v, min, max) => Math.max(min, Math.min(max, v))
+
+  const openSvgInNewTab = ({ source, initViewBox }) => {
+    const getClonedSvg = () => {
+      if (typeof source === 'string') {
+        const template = document.createElement('template')
+        template.innerHTML = source.trim()
+        const svg = template.content.querySelector('svg')
+        return svg ? svg.cloneNode(true) : null
+      }
+      if (source && typeof source.cloneNode === 'function') {
+        return source.cloneNode(true)
+      }
+      return null
+    }
+
+    const clone = getClonedSvg()
+    if (!clone) return
+    if (initViewBox && initViewBox.length === 4) {
+      clone.setAttribute('viewBox', initViewBox.join(' '))
+    }
+    if (!clone.getAttribute('xmlns')) clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+    if (!clone.getAttribute('xmlns:xlink') && clone.outerHTML.includes('xlink:')) {
+      clone.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink')
+    }
+    // inject background to match current theme
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark'
+    const bg = getComputedStyle(document.body).backgroundColor || (isDark ? '#1e1e1e' : '#ffffff')
+    if (!clone.style.background) clone.style.background = bg
+
+    const serializer = new XMLSerializer()
+    const svgSource = serializer.serializeToString(clone)
+    const htmlSource = `<!doctype html><html><head><meta charset="utf-8" />
+      <style>
+        html, body { width: 100%; height: 100%; margin: 0; display: flex; align-items: center; justify-content: center; background: ${bg}; }
+        svg { max-width: 100%; max-height: 100%; height: auto; width: auto; }
+      </style>
+      </head><body>${svgSource}</body></html>`
+    const blob = new Blob([htmlSource], { type: 'text/html;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    window.open(url, '_blank', 'noopener')
+    setTimeout(() => URL.revokeObjectURL(url), 30000)
+  }
+
+  const attachMermaidViewerButton = wrap => {
+    let btn = wrap.querySelector('.mermaid-open-btn')
+    if (!btn) {
+      btn = document.createElement('button')
+      btn.type = 'button'
+      btn.className = 'mermaid-open-btn'
+      wrap.appendChild(btn)
+    }
+
+    btn.innerHTML = '<i class="fa fa-search fa-fw" aria-hidden="true"></i>'
+
+    if (!btn.__mermaidViewerBound) {
+      btn.addEventListener('click', e => {
+        e.preventDefault()
+        e.stopPropagation()
+        const svg = wrap.__mermaidOriginalSvg || wrap.querySelector('svg')
+        if (!svg) return
+        const initViewBox = wrap.__mermaidInitViewBox
+        if (typeof svg === 'string') {
+          openSvgInNewTab({ source: svg, initViewBox })
+          return
+        }
+        openSvgInNewTab({ source: svg, initViewBox })
+      })
+      btn.__mermaidViewerBound = true
+    }
+  }
+
+  // Zoom around a point (px, py) in the SVG viewport (in viewBox coordinates)
+  const zoomAtPoint = (vb, factor, px, py) => {
+    const w = vb[2] * factor
+    const h = vb[3] * factor
+    const nx = px - (px - vb[0]) * factor
+    const ny = py - (py - vb[1]) * factor
+    return [nx, ny, w, h]
+  }
+
+  const initMermaidGestures = wrap => {
+    const svg = wrap.querySelector('svg')
+    if (!svg) return
+
+    // Ensure viewBox exists so gestures always work
+    const initVb = getSvgViewBox(svg)
+    wrap.__mermaidInitViewBox = initVb
+    wrap.__mermaidCurViewBox = initVb.slice()
+    setSvgViewBox(svg, initVb)
+
+    // Avoid binding multiple times on themeChange/pjax
+    if (wrap.__mermaidGestureBound) return
+    wrap.__mermaidGestureBound = true
+
+    // Helper: map client (viewport) coordinate -> viewBox coordinate
+    const clientToViewBox = (clientX, clientY) => {
+      const rect = svg.getBoundingClientRect()
+      const vb = wrap.__mermaidCurViewBox || getSvgViewBox(svg)
+      const x = vb[0] + (clientX - rect.left) * (vb[2] / rect.width)
+      const y = vb[1] + (clientY - rect.top) * (vb[3] / rect.height)
+      return { x, y, rect, vb }
+    }
+
+    const state = {
+      pointers: new Map(),
+      startVb: null,
+      startDist: 0,
+      startCenter: null
+    }
+
+    const clampVb = vb => {
+      const init = wrap.__mermaidInitViewBox || vb
+      const minW = init[2] * 0.1
+      const maxW = init[2] * 10
+      const minH = init[3] * 0.1
+      const maxH = init[3] * 10
+      vb[2] = clamp(vb[2], minW, maxW)
+      vb[3] = clamp(vb[3], minH, maxH)
+      return vb
+    }
+
+    const setCurVb = vb => {
+      vb = clampVb(vb)
+      wrap.__mermaidCurViewBox = vb
+      setSvgViewBox(svg, vb)
+    }
+
+    const onPointerDown = e => {
+      // Allow only primary button for mouse
+      if (e.pointerType === 'mouse' && e.button !== 0) return
+      svg.setPointerCapture(e.pointerId)
+      state.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
+
+      if (state.pointers.size === 1) {
+        state.startVb = (wrap.__mermaidCurViewBox || getSvgViewBox(svg)).slice()
+      } else if (state.pointers.size === 2) {
+        const pts = [...state.pointers.values()]
+        const dx = pts[0].x - pts[1].x
+        const dy = pts[0].y - pts[1].y
+        state.startDist = Math.hypot(dx, dy)
+        state.startVb = (wrap.__mermaidCurViewBox || getSvgViewBox(svg)).slice()
+        state.startCenter = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 }
+      }
+    }
+
+    const onPointerMove = e => {
+      if (!state.pointers.has(e.pointerId)) return
+      state.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
+
+      // Pan with 1 pointer
+      if (state.pointers.size === 1 && state.startVb) {
+        const p = [...state.pointers.values()][0]
+        const prev = { x: e.clientX - e.movementX, y: e.clientY - e.movementY }
+        // movementX/Y unreliable on touch, compute from stored last position
+        const last = wrap.__mermaidLastSinglePointer || p
+        const dxClient = p.x - last.x
+        const dyClient = p.y - last.y
+        wrap.__mermaidLastSinglePointer = p
+
+        const { rect } = clientToViewBox(p.x, p.y)
+        const vb = (wrap.__mermaidCurViewBox || getSvgViewBox(svg)).slice()
+        const dx = dxClient * (vb[2] / rect.width)
+        const dy = dyClient * (vb[3] / rect.height)
+        setCurVb([vb[0] - dx, vb[1] - dy, vb[2], vb[3]])
+        return
+      }
+
+      // Pinch zoom with 2 pointers
+      if (state.pointers.size === 2 && state.startVb && state.startDist > 0) {
+        const pts = [...state.pointers.values()]
+        const dx = pts[0].x - pts[1].x
+        const dy = pts[0].y - pts[1].y
+        const dist = Math.hypot(dx, dy)
+        if (!dist) return
+        const factor = state.startDist / dist // dist bigger => zoom in (viewBox smaller)
+
+        const cx = (pts[0].x + pts[1].x) / 2
+        const cy = (pts[0].y + pts[1].y) / 2
+        const centerClient = { x: cx, y: cy }
+
+        const pxy = clientToViewBox(centerClient.x, centerClient.y)
+        const cpx = pxy.x
+        const cpy = pxy.y
+
+        const vb = zoomAtPoint(state.startVb, factor, cpx, cpy)
+        setCurVb(vb)
+      }
+    }
+
+    const onPointerUpOrCancel = e => {
+      state.pointers.delete(e.pointerId)
+      if (state.pointers.size === 0) {
+        state.startVb = null
+        state.startDist = 0
+        state.startCenter = null
+        wrap.__mermaidLastSinglePointer = null
+      } else if (state.pointers.size === 1) {
+        // reset single pointer baseline to avoid jump
+        wrap.__mermaidLastSinglePointer = [...state.pointers.values()][0]
+      }
+    }
+
+    // Wheel zoom (mouse/trackpad)
+    const onWheel = e => {
+      // ctrlKey on mac trackpad pinch; we treat both as zoom
+      e.preventDefault()
+      const delta = e.deltaY
+      const zoomFactor = delta > 0 ? 1.1 : 0.9
+      const { x, y } = clientToViewBox(e.clientX, e.clientY)
+      const vb = (wrap.__mermaidCurViewBox || getSvgViewBox(svg)).slice()
+      setCurVb(zoomAtPoint(vb, zoomFactor, x, y))
+    }
+
+    const onDblClick = () => {
+      const init = wrap.__mermaidInitViewBox
+      if (!init) return
+      wrap.__mermaidCurViewBox = init.slice()
+      setSvgViewBox(svg, init)
+    }
+
+    svg.addEventListener('pointerdown', onPointerDown)
+    svg.addEventListener('pointermove', onPointerMove)
+    svg.addEventListener('pointerup', onPointerUpOrCancel)
+    svg.addEventListener('pointercancel', onPointerUpOrCancel)
+    svg.addEventListener('wheel', onWheel, { passive: false })
+    svg.addEventListener('dblclick', onDblClick)
+  }
+
+  const runMermaid = ele => {
+    window.loadMermaid = true
+    const theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'default'
+
+    ele.forEach((item, index) => {
+      const mermaidSrc = item.firstElementChild
+
+      // Clear old render (themeChange/pjax will rerun)
+      const oldSvg = item.querySelector('svg')
+      if (oldSvg) oldSvg.remove()
+      item.__mermaidGestureBound = false
+
+      const config = mermaidSrc.dataset.config ? JSON.parse(mermaidSrc.dataset.config) : {}
+      if (!config.theme) {
+        config.theme = theme
+      }
+      const mermaidThemeConfig = `%%{init: ${JSON.stringify(config)}}%%\n`
+      const mermaidID = `mermaid-${index}`
+      const mermaidDefinition = mermaidThemeConfig + mermaidSrc.textContent
+
+      const renderFn = mermaid.render(mermaidID, mermaidDefinition)
+      const renderMermaid = svg => {
+        mermaidSrc.insertAdjacentHTML('afterend', svg)
+        if (true) initMermaidGestures(item)
+        item.__mermaidOriginalSvg = svg
+        if (true) attachMermaidViewerButton(item)
+      }
+
+
+      // mermaid v9 and v10 compatibility
+      typeof renderFn === 'string' ? renderMermaid(renderFn) : renderFn.then(({ svg }) => renderMermaid(svg))
+    })
+  }
+
+  const codeToMermaid = () => {
+    const codeMermaidEle = document.querySelectorAll('pre > code.mermaid')
+    if (codeMermaidEle.length === 0) return
+
+    codeMermaidEle.forEach(ele => {
+      const preEle = document.createElement('pre')
+      preEle.className = 'mermaid-src'
+      preEle.hidden = true
+      preEle.textContent = ele.textContent
+      const newEle = document.createElement('div')
+      newEle.className = 'mermaid-wrap'
+      newEle.appendChild(preEle)
+      ele.parentNode.replaceWith(newEle)
+    })
+  }
+
+  const loadMermaid = () => {
+    if (true) codeToMermaid()
+    const $mermaid = document.querySelectorAll('#article-container .mermaid-wrap')
+    if ($mermaid.length === 0) return
+
+    const runMermaidFn = () => runMermaid($mermaid)
+    btf.addGlobalFn('themeChange', runMermaidFn, 'mermaid')
+    window.loadMermaid ? runMermaidFn() : btf.getScript('https://cdn.jsdelivr.net/npm/mermaid@11.12.2/dist/mermaid.min.js').then(runMermaidFn)
+  }
+
+  btf.addGlobalFn('encrypt', loadMermaid, 'mermaid')
+  window.pjax ? loadMermaid() : document.addEventListener('DOMContentLoaded', loadMermaid)
+})()</script></div><script async data-pjax src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script></div></body></html>
