@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>计算器 · 项目专区</title>
+<link rel="stylesheet" href="/demos/assets/base.css">
+<style>
+  .calc-wrap { width: min(760px, 100%); margin: 3vh auto 0; display: grid; grid-template-columns: minmax(0, 1fr) 240px; gap: 18px; align-items: start; }
+  .calc { padding: 22px; }
+  .calc-display { text-align: right; padding: 16px 12px 18px; border-bottom: 1px solid var(--line); margin-bottom: 16px; min-height: 96px; }
+  .calc-expr { font-size: clamp(28px, 7vw, 38px); font-weight: 300; letter-spacing: .02em; word-break: break-all; min-height: 46px; line-height: 1.2; font-variant-numeric: tabular-nums; }
+  .calc-result { color: var(--muted); font-size: 15px; min-height: 22px; margin-top: 6px; font-variant-numeric: tabular-nums; }
+  .calc-result.error { color: var(--danger); }
+  .calc-keys { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+  .calc-keys button { border: 1px solid var(--line); background: rgba(255,255,255,.04); color: var(--text); border-radius: 14px; height: 58px; font-size: 19px; cursor: pointer; font-family: inherit; transition: .12s; user-select: none; }
+  .calc-keys button:hover { background: rgba(255,255,255,.09); border-color: rgba(148,163,208,.35); }
+  .calc-keys button:active { transform: scale(.97); }
+  .calc-keys .fn { color: var(--muted); font-size: 16px; }
+  .calc-keys .op { color: #a9bcff; font-size: 21px; }
+  .calc-keys .eq { grid-column: span 3; background: linear-gradient(135deg, #6c8cff, #8b6cff); border-color: transparent; color: #fff; font-weight: 600; }
+  .calc-keys .eq:hover { background: linear-gradient(135deg, #7d9aff, #9b7dff); }
+  .calc-keys .zero { grid-column: span 2; }
+  .calc-history { padding: 18px; max-height: 520px; display: flex; flex-direction: column; }
+  .calc-history h2 { margin: 0 0 12px; font-size: 14px; font-weight: 500; color: var(--muted); letter-spacing: .06em; text-transform: uppercase; }
+  .calc-history ul { list-style: none; margin: 0; padding: 0; overflow: auto; flex: 1; }
+  .calc-history li { margin-bottom: 8px; }
+  .calc-history li button { width: 100%; text-align: right; border: 1px solid transparent; background: rgba(255,255,255,.03); color: var(--muted); border-radius: 10px; padding: 8px 10px; font-size: 13px; cursor: pointer; font-family: inherit; word-break: break-all; }
+  .calc-history li button:hover { color: var(--text); border-color: var(--line); background: rgba(255,255,255,.06); }
+  .calc-history .empty { color: #6f7c9e; font-size: 13px; }
+  .calc-history .clear { margin-top: 12px; border: 0; background: transparent; color: #6f7c9e; font-size: 12px; cursor: pointer; font-family: inherit; text-align: left; padding: 4px 0; }
+  .calc-history .clear:hover { color: var(--danger); }
+  @media (max-width: 720px) { .calc-wrap { grid-template-columns: 1fr; } .calc-history { max-height: 240px; } .calc-keys button { height: 50px; font-size: 17px; } }
+</style>
+</head>
+<body>
+<main class="demo-shell">
+  <header class="demo-topbar">
+    <a class="back-link" href="/projects/">← 返回项目专区</a>
+    <span class="demo-badge">键盘可用 · 安全解析</span>
+  </header>
+
+  <div class="calc-wrap">
+    <section class="panel calc" aria-label="计算器">
+      <div class="calc-display">
+        <div class="calc-expr" id="expr" aria-live="polite">0</div>
+        <div class="calc-result" id="result"></div>
+      </div>
+      <div class="calc-keys" id="keys">
+        <button type="button" class="fn" data-value="C">C</button>
+        <button type="button" class="fn" data-value="(">(</button>
+        <button type="button" class="fn" data-value=")">)</button>
+        <button type="button" class="fn" data-value="←" title="退格">←</button>
+        <button type="button" class="op" data-value="÷">÷</button>
+
+        <button type="button" data-value="7">7</button>
+        <button type="button" data-value="8">8</button>
+        <button type="button" data-value="9">9</button>
+        <button type="button" class="fn" data-value="%">%</button>
+        <button type="button" class="op" data-value="×">×</button>
+
+        <button type="button" data-value="4">4</button>
+        <button type="button" data-value="5">5</button>
+        <button type="button" data-value="6">6</button>
+        <button type="button" class="fn" data-value="±">±</button>
+        <button type="button" class="op" data-value="−">−</button>
+
+        <button type="button" data-value="1">1</button>
+        <button type="button" data-value="2">2</button>
+        <button type="button" data-value="3">3</button>
+        <button type="button" data-value=".">.</button>
+        <button type="button" class="op" data-value="+">+</button>
+
+        <button type="button" class="zero" data-value="0">0</button>
+        <button type="button" class="eq" data-value="=">=</button>
+      </div>
+    </section>
+
+    <aside class="panel calc-history" aria-label="计算历史">
+      <h2>历史记录</h2>
+      <ul id="history"></ul>
+      <button type="button" class="clear" id="clearHistory">清除历史</button>
+    </aside>
+  </div>
+</main>
+
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+(() => {
+  const exprEl = document.getElementById('expr');
+  const resultEl = document.getElementById('result');
+  const keysEl = document.getElementById('keys');
+  const historyEl = document.getElementById('history');
+  const clearHistoryBtn = document.getElementById('clearHistory');
+  const toastEl = document.getElementById('toast');
+
+  const HISTORY_KEY = 'calc.history.v1';
+  let expr = '';
+  let justEvaluated = false;
+  let history = loadHistory();
+  let toastTimer = null;
+
+  function loadHistory() {
+    try {
+      const data = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+      return Array.isArray(data) ? data.slice(0, 10) : [];
+    } catch (e) { return []; }
+  }
+
+  function saveHistory() {
+    try { localStorage.setItem(HISTORY_KEY, JSON.stringify(history)); } catch (e) { /* ignore */ }
+  }
+
+  function toast(text) {
+    toastEl.textContent = text;
+    toastEl.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastEl.classList.remove('show'), 1600);
+  }
+
+  function formatNumber(n) {
+    if (!Number.isFinite(n)) return '错误';
+    if (Object.is(n, -0) || n === 0) return '0';
+    const abs = Math.abs(n);
+    if (abs >= 1e12 || abs < 1e-9) return n.toExponential(6).replace(/\.?0+e/, 'e');
+    return String(Number(n.toPrecision(12)));
+  }
+
+  function evaluateExpression(raw) {
+    const s = raw.replace(/×/g, '*').replace(/÷/g, '/').replace(/−/g, '-').replace(/\s+/g, '');
+    if (!s) throw new Error('empty');
+    let i = 0;
+
+    function parseExpr() {
+      let value = parseTerm();
+      while (s[i] === '+' || s[i] === '-') {
+        const op = s[i++];
+        const right = parseTerm();
+        value = op === '+' ? value + right : value - right;
+      }
+      return value;
+    }
+
+    function parseTerm() {
+      let value = parseFactor();
+      while (s[i] === '*' || s[i] === '/') {
+        const op = s[i++];
+        const right = parseFactor();
+        if (op === '/' && right === 0) throw new Error('division by zero');
+        value = op === '*' ? value * right : value / right;
+      }
+      return value;
+    }
+
+    function parseFactor() {
+      if (s[i] === '+') { i++; return parseFactor(); }
+      if (s[i] === '-') { i++; return -parseFactor(); }
+      if (s[i] === '(') {
+        i++;
+        const value = parseExpr();
+        if (s[i] !== ')') throw new Error('missing )');
+        i++;
+        return value;
+      }
+      const start = i;
+      while (i < s.length && /[0-9.]/.test(s[i])) i++;
+      if (start === i) throw new Error('expected number');
+      let value = Number(s.slice(start, i));
+      if (!Number.isFinite(value)) throw new Error('bad number');
+      while (s[i] === '%') { i++; value /= 100; }
+      return value;
+    }
+
+    const value = parseExpr();
+    if (i !== s.length) throw new Error('trailing input');
+    if (!Number.isFinite(value)) throw new Error('not finite');
+    return value;
+  }
+
+  function updatePreview() {
+    const shown = expr || '0';
+    exprEl.textContent = shown;
+    if (!expr) { resultEl.textContent = ''; resultEl.classList.remove('error'); return; }
+    try {
+      const value = evaluateExpression(expr);
+      resultEl.textContent = `= ${formatNumber(value)}`;
+      resultEl.classList.remove('error');
+    } catch (e) {
+      resultEl.textContent = '';
+      resultEl.classList.remove('error');
+    }
+  }
+
+  function renderHistory() {
+    historyEl.innerHTML = '';
+    if (!history.length) {
+      const li = document.createElement('li');
+      li.className = 'empty';
+      li.textContent = '还没有计算记录';
+      historyEl.append(li);
+      return;
+    }
+    history.forEach((entry) => {
+      const li = document.createElement('li');
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = entry;
+      btn.title = '点击填入表达式';
+      btn.addEventListener('click', () => {
+        expr = entry.split(' = ')[0];
+        justEvaluated = false;
+        updatePreview();
+      });
+      li.append(btn);
+      historyEl.append(li);
+    });
+  }
+
+  function addHistory(entry) {
+    history = [entry, ...history.filter((item) => item !== entry)].slice(0, 10);
+    saveHistory();
+    renderHistory();
+  }
+
+  function evaluate() {
+    if (!expr) return;
+    try {
+      const value = evaluateExpression(expr);
+      const result = formatNumber(value);
+      addHistory(`${expr} = ${result}`);
+      expr = result;
+      justEvaluated = true;
+      exprEl.textContent = result;
+      resultEl.textContent = '';
+      resultEl.classList.remove('error');
+    } catch (e) {
+      resultEl.textContent = '表达式有误';
+      resultEl.classList.add('error');
+    }
+  }
+
+  function push(value) {
+    if (value === 'C') {
+      expr = '';
+      justEvaluated = false;
+      updatePreview();
+      return;
+    }
+    if (value === '←') {
+      expr = expr.slice(0, -1);
+      justEvaluated = false;
+      updatePreview();
+      return;
+    }
+    if (value === '=') {
+      evaluate();
+      return;
+    }
+    if (value === '±') {
+      if (!expr) return;
+      expr = expr.startsWith('−') ? expr.slice(1) : '−' + expr;
+      justEvaluated = false;
+      updatePreview();
+      return;
+    }
+
+    if (justEvaluated && /[0-9.]/.test(value)) expr = '';
+    justEvaluated = false;
+
+    const last = expr.slice(-1);
+    const isOp = /[+−×÷]/.test(value);
+
+    if (isOp) {
+      if (!expr) {
+        if (value === '−') expr = '−';
+        updatePreview();
+        return;
+      }
+      if (/[+−×÷]/.test(last)) {
+        expr = expr.slice(0, -1) + value;
+      } else if (last === '(') {
+        if (value === '−') expr += value;
+      } else {
+        expr += value;
+      }
+      updatePreview();
+      return;
+    }
+
+    if (value === '%') {
+      if (/[0-9)]/.test(last)) expr += '%';
+      updatePreview();
+      return;
+    }
+
+    if (value === '.') {
+      const segment = expr.split(/[+−×÷()%]/).pop();
+      if (segment.includes('.')) return;
+      if (!segment) expr += '0.';
+      else expr += '.';
+      updatePreview();
+      return;
+    }
+
+    if (/[0-9]/.test(value)) {
+      if (expr === '0') expr = value;
+      else expr += value;
+      updatePreview();
+      return;
+    }
+
+    if (value === '(') {
+      if (/[0-9)]/.test(last)) expr += '×';
+      expr += '(';
+      updatePreview();
+      return;
+    }
+
+    if (value === ')') {
+      const opens = (expr.match(/\(/g) || []).length;
+      const closes = (expr.match(/\)/g) || []).length;
+      if (opens > closes && /[0-9)%]/.test(last)) expr += ')';
+      updatePreview();
+    }
+  }
+
+  keysEl.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-value]');
+    if (btn) push(btn.dataset.value);
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const key = e.key;
+    let value = null;
+    if (/^[0-9.]$/.test(key)) value = key;
+    else if (key === '+') value = '+';
+    else if (key === '-') value = '−';
+    else if (key === '*') value = '×';
+    else if (key === '/') value = '÷';
+    else if (key === '%') value = '%';
+    else if (key === '(' || key === ')') value = key;
+    else if (key === 'Enter' || key === '=') value = '=';
+    else if (key === 'Backspace') value = '←';
+    else if (key === 'Escape' || key.toLowerCase() === 'c') value = 'C';
+
+    if (value !== null) {
+      e.preventDefault();
+      push(value);
+      return;
+    }
+
+    if (e.key.length === 1 && /[a-zA-Z]/.test(e.key)) return;
+  });
+
+  clearHistoryBtn.addEventListener('click', () => {
+    history = [];
+    saveHistory();
+    renderHistory();
+    toast('历史已清除');
+  });
+
+  renderHistory();
+  updatePreview();
+})();
+</script>
+</body>
+</html>

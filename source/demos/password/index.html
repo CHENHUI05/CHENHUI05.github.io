@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>密码生成器 · 项目专区</title>
+<link rel="stylesheet" href="/demos/assets/base.css">
+<style>
+  .pw { width: min(620px, 100%); margin: 4vh auto 0; padding: 26px; }
+  .pw-output { display: flex; align-items: stretch; gap: 10px; padding: 16px; border-radius: 16px; background: linear-gradient(135deg, rgba(108,140,255,.14), rgba(61,220,151,.08)); border: 1px solid rgba(108,140,255,.28); }
+  .pw-output code { flex: 1; min-width: 0; font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; font-size: clamp(16px, 4.2vw, 22px); line-height: 1.5; letter-spacing: .04em; word-break: break-all; align-self: center; }
+  .pw-output .btn { flex: none; align-self: center; }
+  .pw-strength { margin: 14px 2px 22px; }
+  .pw-bar { height: 8px; border-radius: 999px; background: rgba(148,163,208,.16); overflow: hidden; }
+  .pw-bar span { display: block; height: 100%; width: 0; border-radius: inherit; transition: width .3s ease, background .3s ease; background: var(--danger); }
+  .pw-strength-text { display: flex; justify-content: space-between; gap: 12px; margin-top: 8px; color: var(--muted); font-size: 12px; }
+  .pw-length { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+  .pw-length label { color: var(--muted); font-size: 14px; }
+  .pw-length b { color: var(--text); font-size: 20px; min-width: 34px; text-align: center; font-variant-numeric: tabular-nums; }
+  .pw-length input[type="range"] { flex: 1; accent-color: var(--accent); }
+  .pw-options { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; margin-bottom: 20px; }
+  .pw-options label { display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: 13px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 12px; cursor: pointer; background: rgba(255,255,255,.02); }
+  .pw-options label:hover { border-color: rgba(108,140,255,.4); }
+  .pw-options input { accent-color: var(--accent); }
+  .pw-actions { display: flex; gap: 10px; }
+  .pw-actions .btn-primary { flex: 1; }
+  .pw-meta { margin: 16px 0 0; color: #6f7c9e; font-size: 12px; line-height: 1.7; }
+  .pw-meta b { color: var(--muted); font-weight: 500; }
+  @media (max-width: 480px) { .pw { padding: 18px 16px; margin-top: 10px; } .pw-options { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main class="demo-shell">
+  <header class="demo-topbar">
+    <a class="back-link" href="/projects/">← 返回项目专区</a>
+    <span class="demo-badge">Web Crypto · 本地生成</span>
+  </header>
+
+  <section class="panel pw" aria-label="密码生成器">
+    <div class="pw-output">
+      <code id="password" aria-live="polite">生成中…</code>
+      <button type="button" class="btn" id="copy">复制</button>
+    </div>
+
+    <div class="pw-strength">
+      <div class="pw-bar"><span id="strengthBar"></span></div>
+      <div class="pw-strength-text">
+        <span id="strengthText">强度：—</span>
+        <span id="entropyText">熵：— bit</span>
+      </div>
+    </div>
+
+    <div class="pw-length">
+      <label for="length">长度</label>
+      <b id="lengthValue">16</b>
+      <input id="length" type="range" min="8" max="32" value="16" step="1">
+    </div>
+
+    <div class="pw-options">
+      <label><input type="checkbox" id="lower" checked> 小写字母 a-z</label>
+      <label><input type="checkbox" id="upper" checked> 大写字母 A-Z</label>
+      <label><input type="checkbox" id="digits" checked> 数字 0-9</label>
+      <label><input type="checkbox" id="symbols" checked> 符号 !@#$%…</label>
+      <label><input type="checkbox" id="exclude"> 排除易混淆字符</label>
+    </div>
+
+    <div class="pw-actions">
+      <button type="button" class="btn btn-primary" id="generate">重新生成</button>
+    </div>
+
+    <p class="pw-meta">
+      字符池 <b id="poolSize">—</b> 个字符，随机数来自 <b>crypto.getRandomValues</b>，不经过服务器。
+      密码只显示在你的浏览器里，刷新后不会保留。
+    </p>
+  </section>
+</main>
+
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+(() => {
+  const SETS = {
+    lower: 'abcdefghijklmnopqrstuvwxyz',
+    upper: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
+    digits: '0123456789',
+    symbols: '!@#$%^&*()-_=+[]{};:,.<>?/'
+  };
+  const AMBIGUOUS = /[il1ILo0O]/g;
+
+  const passwordEl = document.getElementById('password');
+  const copyBtn = document.getElementById('copy');
+  const generateBtn = document.getElementById('generate');
+  const lengthEl = document.getElementById('length');
+  const lengthValue = document.getElementById('lengthValue');
+  const strengthBar = document.getElementById('strengthBar');
+  const strengthText = document.getElementById('strengthText');
+  const entropyText = document.getElementById('entropyText');
+  const poolSize = document.getElementById('poolSize');
+  const excludeEl = document.getElementById('exclude');
+  const toastEl = document.getElementById('toast');
+
+  const optionEls = {
+    lower: document.getElementById('lower'),
+    upper: document.getElementById('upper'),
+    digits: document.getElementById('digits'),
+    symbols: document.getElementById('symbols')
+  };
+
+  let toastTimer = null;
+  let current = '';
+
+  function toast(text) {
+    toastEl.textContent = text;
+    toastEl.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastEl.classList.remove('show'), 1800);
+  }
+
+  function randomInt(max) {
+    if (window.crypto && crypto.getRandomValues) {
+      const buf = new Uint32Array(1);
+      crypto.getRandomValues(buf);
+      return buf[0] % max;
+    }
+    return Math.floor(Math.random() * max);
+  }
+
+  function getSelectedSets() {
+    const sets = [];
+    Object.keys(optionEls).forEach((key) => {
+      if (!optionEls[key].checked) return;
+      let chars = SETS[key];
+      if (excludeEl.checked) chars = chars.replace(AMBIGUOUS, '');
+      if (chars) sets.push(chars);
+    });
+    return sets;
+  }
+
+  function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = randomInt(i + 1);
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+
+  function updateStrength(entropy) {
+    let label = '弱';
+    let color = '#ff6b81';
+    if (entropy >= 120) { label = '极强'; color = '#3ddc97'; }
+    else if (entropy >= 80) { label = '强'; color = '#3ddc97'; }
+    else if (entropy >= 50) { label = '中等'; color = '#ffc857'; }
+
+    strengthText.textContent = `强度：${label}`;
+    entropyText.textContent = `熵：${entropy.toFixed(1)} bit`;
+    strengthBar.style.width = `${Math.min(100, (entropy / 128) * 100)}%`;
+    strengthBar.style.background = color;
+    strengthText.style.color = color;
+  }
+
+  function generate() {
+    const sets = getSelectedSets();
+    if (!sets.length) {
+      current = '';
+      passwordEl.textContent = '请至少选择一种字符类型';
+      poolSize.textContent = '0';
+      updateStrength(0);
+      toast('至少勾选一种字符类型');
+      return;
+    }
+
+    const length = Number(lengthEl.value);
+    const pool = sets.join('');
+    const chars = [];
+
+    sets.forEach((set) => chars.push(set[randomInt(set.length)]));
+    while (chars.length < length) chars.push(pool[randomInt(pool.length)]);
+    shuffle(chars);
+
+    current = chars.slice(0, length).join('');
+    passwordEl.textContent = current;
+    poolSize.textContent = String(pool.length);
+    updateStrength(length * Math.log2(pool.length));
+  }
+
+  function copy() {
+    if (!current) return;
+    const done = () => toast('已复制到剪贴板');
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(current).then(done).catch(() => fallbackCopy(done));
+    } else {
+      fallbackCopy(done);
+    }
+  }
+
+  function fallbackCopy(done) {
+    const ta = document.createElement('textarea');
+    ta.value = current;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); done(); } catch (e) { toast('复制失败，请手动选择'); }
+    document.body.removeChild(ta);
+  }
+
+  lengthEl.addEventListener('input', () => {
+    lengthValue.textContent = lengthEl.value;
+    generate();
+  });
+  Object.values(optionEls).forEach((el) => el.addEventListener('change', generate));
+  excludeEl.addEventListener('change', generate);
+  generateBtn.addEventListener('click', generate);
+  copyBtn.addEventListener('click', copy);
+
+  generate();
+})();
+</script>
+</body>
+</html>

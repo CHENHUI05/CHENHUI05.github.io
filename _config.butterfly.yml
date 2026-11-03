@@ -22,6 +22,7 @@ menu:
   归档: /archives/ || fas fa-archive
   标签: /tags/ || fas fa-tags
   分类: /categories/ || fas fa-folder-open
+  项目: /projects/ || fas fa-code
   关于: /about/ || fas fa-heart
 
 # --------------------------------------
@@ -47,7 +48,6 @@ code_blocks:
 # Formal:
 #   icon: link || the description || color
 social:
-  fab fa-github: https://github.com/CHENHUI05 || Github || '#24292e'
 
 # --------------------------------------
 # Image Settings
@@ -56,7 +56,7 @@ social:
 favicon: /img/favicon.png
 
 avatar:
-  img: /img/butterfly-icon.png
+  img: /img/avatar.jpg
   effect: false
 
 # Disable all banner images
@@ -193,7 +193,7 @@ index_post_content:
 toc:
   post: true
   page: false
-  number: true
+  number: false
   expand: false
   # Only for post
   style_simple: false
@@ -262,7 +262,7 @@ footer:
     since: 2025
   # Copyright of theme and framework
   copyright:
-    enable: true
+    enable: false
     version: true
   custom_text:
 
@@ -289,10 +289,10 @@ aside:
       enable: true
       icon: fab fa-github
       text: Follow Me
-      link: https://github.com/xxxxxx
+      link: https://github.com/CHENHUI05
   card_announcement:
     enable: true
-    content: This is my Blog
+    content: 欢迎来到我的博客！
   card_recent_post:
     enable: true
     # If set 0 will show all
@@ -933,9 +933,9 @@ abcjs:
 # Mermaid
 # https://github.com/mermaid-js/mermaid
 mermaid:
-  enable: false
+  enable: true
   # Write Mermaid diagrams using code blocks
-  code_write: false
+  code_write: true
   # built-in themes: default / forest / dark / neutral
   theme:
     light: default

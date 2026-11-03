@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>待办清单 · 项目专区</title>
+<link rel="stylesheet" href="/demos/assets/base.css">
+<style>
+  .todo { width: min(640px, 100%); margin: 4vh auto 0; padding: 28px; }
+  .todo h1 { margin: 0 0 6px; font-size: 26px; font-weight: 600; }
+  .todo .sub { margin: 0 0 22px; color: var(--muted); font-size: 14px; }
+  .todo-form { display: flex; gap: 10px; }
+  .todo-form input { flex: 1; min-width: 0; background: rgba(255,255,255,.05); border: 1px solid var(--line); color: var(--text); border-radius: 12px; padding: 12px 14px; font-size: 14px; outline: none; font-family: inherit; transition: .2s; }
+  .todo-form input:focus { border-color: rgba(108,140,255,.65); box-shadow: 0 0 0 3px rgba(108,140,255,.12); }
+  .todo-form input::placeholder { color: #6f7c9e; }
+  .todo-form button { flex: none; }
+  .todo-filters { display: flex; gap: 6px; margin: 20px 0 12px; flex-wrap: wrap; }
+  .todo-filters button { border: 1px solid transparent; background: transparent; color: var(--muted); border-radius: 999px; padding: 7px 12px; font-size: 13px; cursor: pointer; font-family: inherit; }
+  .todo-filters button.active { color: var(--text); background: rgba(108,140,255,.16); border-color: rgba(108,140,255,.25); }
+  .todo-filters span { opacity: .7; margin-left: 2px; }
+  .todo-list { list-style: none; margin: 0; padding: 0; min-height: 80px; }
+  .todo-item { display: flex; align-items: center; gap: 12px; padding: 12px 4px; border-bottom: 1px solid var(--line); animation: slide .18s ease both; }
+  .todo-item:last-child { border-bottom: 0; }
+  @keyframes slide { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+  .todo-check { flex: none; width: 22px; height: 22px; border-radius: 50%; border: 1.5px solid rgba(148,163,208,.5); background: transparent; color: #07111f; cursor: pointer; display: grid; place-items: center; font-size: 13px; transition: .15s; padding: 0; }
+  .todo-check:hover { border-color: var(--accent-2); }
+  .todo-item.done .todo-check { background: var(--accent-2); border-color: var(--accent-2); }
+  .todo-text { flex: 1; font-size: 15px; line-height: 1.5; word-break: break-word; }
+  .todo-item.done .todo-text { color: var(--muted); text-decoration: line-through; }
+  .todo-edit { flex: 1; min-width: 0; background: rgba(255,255,255,.07); border: 1px solid rgba(108,140,255,.5); color: var(--text); border-radius: 8px; padding: 5px 8px; font-size: 15px; font-family: inherit; outline: none; }
+  .todo-del { flex: none; width: 28px; height: 28px; border-radius: 8px; border: 0; background: transparent; color: #6f7c9e; font-size: 20px; line-height: 1; cursor: pointer; opacity: 0; transition: .15s; }
+  .todo-item:hover .todo-del, .todo-del:focus { opacity: 1; }
+  .todo-del:hover { color: var(--danger); background: rgba(255,107,129,.12); }
+  .todo-empty { text-align: center; color: var(--muted); font-size: 14px; padding: 34px 0 26px; }
+  .todo-footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
+  .todo-clear { border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 13px; font-family: inherit; padding: 4px; }
+  .todo-clear:hover { color: var(--danger); }
+  .todo-clear:disabled { opacity: .35; cursor: default; }
+  .todo-tip { margin-top: 14px; color: #6f7c9e; font-size: 12px; text-align: center; }
+  @media (max-width: 480px) { .todo { padding: 20px 16px; margin-top: 10px; } .todo-del { opacity: .7; } }
+</style>
+</head>
+<body>
+<main class="demo-shell">
+  <header class="demo-topbar">
+    <a class="back-link" href="/projects/">← 返回项目专区</a>
+    <span class="demo-badge">localStorage · 离线可用</span>
+  </header>
+
+  <section class="panel todo" aria-label="待办清单">
+    <h1>待办清单</h1>
+    <p class="sub">把要做的事写下来，然后一件件划掉。</p>
+
+    <form class="todo-form" id="form">
+      <input id="input" type="text" maxlength="80" placeholder="添加一个任务，回车保存" autocomplete="off">
+      <button class="btn btn-primary" type="submit">添加</button>
+    </form>
+
+    <div class="todo-filters" role="group" aria-label="筛选任务">
+      <button type="button" class="active" data-filter="all">全部 <span id="countAll">0</span></button>
+      <button type="button" data-filter="active">进行中 <span id="countActive">0</span></button>
+      <button type="button" data-filter="done">已完成 <span id="countDone">0</span></button>
+    </div>
+
+    <ul class="todo-list" id="list"></ul>
+    <div class="todo-empty" id="empty">还没有任务，先加一条吧。</div>
+
+    <div class="todo-footer">
+      <span id="leftText">0 项待完成</span>
+      <button type="button" class="todo-clear" id="clear">清除已完成</button>
+    </div>
+    <p class="todo-tip">双击任务文字可以编辑 · 数据保存在浏览器本地</p>
+  </section>
+</main>
+
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+(() => {
+  const STORAGE_KEY = 'todo.v1';
+  const form = document.getElementById('form');
+  const input = document.getElementById('input');
+  const list = document.getElementById('list');
+  const empty = document.getElementById('empty');
+  const leftText = document.getElementById('leftText');
+  const clearBtn = document.getElementById('clear');
+  const countAll = document.getElementById('countAll');
+  const countActive = document.getElementById('countActive');
+  const countDone = document.getElementById('countDone');
+  const filterButtons = [...document.querySelectorAll('.todo-filters button')];
+  const toastEl = document.getElementById('toast');
+
+  let tasks = load();
+  let filter = 'all';
+  let toastTimer = null;
+
+  function uid() {
+    if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+    return String(Date.now()) + Math.random().toString(16).slice(2);
+  }
+
+  function load() {
+    try {
+      const data = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+      return Array.isArray(data) ? data.filter((t) => t && typeof t.text === 'string') : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function save() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
+    } catch (e) { /* storage may be full or blocked */ }
+  }
+
+  function toast(text) {
+    toastEl.textContent = text;
+    toastEl.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastEl.classList.remove('show'), 1800);
+  }
+
+  function visibleTasks() {
+    if (filter === 'active') return tasks.filter((t) => !t.done);
+    if (filter === 'done') return tasks.filter((t) => t.done);
+    return tasks;
+  }
+
+  function updateCounts() {
+    const done = tasks.filter((t) => t.done).length;
+    countAll.textContent = tasks.length;
+    countActive.textContent = tasks.length - done;
+    countDone.textContent = done;
+    leftText.textContent = `${tasks.length - done} 项待完成`;
+    clearBtn.disabled = done === 0;
+  }
+
+  function startEdit(item, task, textEl) {
+    const edit = document.createElement('input');
+    edit.className = 'todo-edit';
+    edit.type = 'text';
+    edit.maxLength = 80;
+    edit.value = task.text;
+    item.replaceChild(edit, textEl);
+    edit.focus();
+    edit.select();
+
+    let finished = false;
+    const commit = () => {
+      if (finished) return;
+      finished = true;
+      const value = edit.value.trim();
+      if (value) task.text = value;
+      save();
+      render();
+    };
+    const cancel = () => {
+      if (finished) return;
+      finished = true;
+      render();
+    };
+
+    edit.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); commit(); }
+      if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+    });
+    edit.addEventListener('blur', commit);
+  }
+
+  function render() {
+    const items = visibleTasks();
+    list.innerHTML = '';
+    items.forEach((task) => {
+      const item = document.createElement('li');
+      item.className = 'todo-item' + (task.done ? ' done' : '');
+
+      const check = document.createElement('button');
+      check.type = 'button';
+      check.className = 'todo-check';
+      check.setAttribute('aria-label', task.done ? '标记为未完成' : '标记为完成');
+      check.textContent = task.done ? '✓' : '';
+      check.addEventListener('click', () => {
+        task.done = !task.done;
+        save();
+        render();
+      });
+
+      const text = document.createElement('span');
+      text.className = 'todo-text';
+      text.textContent = task.text;
+      text.title = '双击编辑';
+      text.addEventListener('dblclick', () => startEdit(item, task, text));
+
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'todo-del';
+      del.setAttribute('aria-label', '删除任务');
+      del.textContent = '×';
+      del.addEventListener('click', () => {
+        tasks = tasks.filter((t) => t.id !== task.id);
+        save();
+        render();
+        toast('已删除');
+      });
+
+      item.append(check, text, del);
+      list.append(item);
+    });
+
+    empty.hidden = items.length !== 0;
+    if (!items.length) {
+      empty.textContent = filter === 'active'
+        ? '没有进行中的任务，休息一下。'
+        : filter === 'done' ? '还没有完成的任务。' : '还没有任务，先加一条吧。';
+    }
+    updateCounts();
+  }
+
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const text = input.value.trim();
+    if (!text) {
+      input.focus();
+      return;
+    }
+    tasks.unshift({ id: uid(), text, done: false, createdAt: Date.now() });
+    input.value = '';
+    save();
+    filter = 'all';
+    filterButtons.forEach((b) => b.classList.toggle('active', b.dataset.filter === 'all'));
+    render();
+    toast('已添加');
+  });
+
+  filterButtons.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      filter = btn.dataset.filter;
+      filterButtons.forEach((b) => b.classList.toggle('active', b === btn));
+      render();
+    });
+  });
+
+  clearBtn.addEventListener('click', () => {
+    const removed = tasks.filter((t) => t.done).length;
+    if (!removed) return;
+    tasks = tasks.filter((t) => !t.done);
+    save();
+    render();
+    toast(`已清除 ${removed} 项`);
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>

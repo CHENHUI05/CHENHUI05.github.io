@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>番茄钟 · 项目专区</title>
+<link rel="stylesheet" href="/demos/assets/base.css">
+<style>
+  .pomo { width: min(560px, 100%); margin: 4vh auto 0; padding: 26px; }
+  .pomo-tabs { display: flex; gap: 8px; padding: 5px; background: rgba(255,255,255,.04); border: 1px solid var(--line); border-radius: 14px; }
+  .pomo-tabs button { flex: 1; border: 0; background: transparent; color: var(--muted); padding: 10px 6px; border-radius: 10px; cursor: pointer; font-size: 14px; font-family: inherit; transition: .2s; }
+  .pomo-tabs button.active { background: linear-gradient(135deg, rgba(108,140,255,.28), rgba(139,108,255,.22)); color: var(--text); box-shadow: inset 0 0 0 1px rgba(108,140,255,.25); }
+  .ring-wrap { position: relative; width: min(280px, 82vw); aspect-ratio: 1; margin: 26px auto 14px; }
+  .ring-wrap svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+  .ring-track { fill: none; stroke: rgba(148,163,208,.14); stroke-width: 10; }
+  .ring-bar { fill: none; stroke: url(#grad); stroke-width: 10; stroke-linecap: round; stroke-dasharray: 703.72; stroke-dashoffset: 0; transition: stroke-dashoffset .25s linear; filter: drop-shadow(0 0 8px rgba(108,140,255,.55)); }
+  .ring-time { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; }
+  .ring-time #time { font-size: clamp(44px, 12vw, 62px); font-weight: 300; letter-spacing: .04em; font-variant-numeric: tabular-nums; }
+  .ring-time #state { color: var(--muted); font-size: 14px; }
+  .pomo-controls { display: flex; justify-content: center; gap: 10px; margin: 18px 0 22px; }
+  .pomo-controls .btn { min-width: 88px; }
+  .pomo-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding-top: 18px; border-top: 1px solid var(--line); }
+  .pomo-stats div { text-align: center; }
+  .pomo-stats b { display: block; font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .pomo-stats span { color: var(--muted); font-size: 12px; }
+  .cycle { display: flex; align-items: center; justify-content: center; gap: 7px; margin-top: 18px; color: var(--muted); font-size: 12px; }
+  .cycle i { width: 8px; height: 8px; border-radius: 50%; background: rgba(148,163,208,.25); display: inline-block; }
+  .cycle i.on { background: var(--accent); box-shadow: 0 0 8px rgba(108,140,255,.8); }
+  @media (max-width: 480px) { .pomo { padding: 18px 16px; margin-top: 10px; } }
+</style>
+</head>
+<body>
+<main class="demo-shell">
+  <header class="demo-topbar">
+    <a class="back-link" href="/projects/">← 返回项目专区</a>
+    <span class="demo-badge">纯前端 · 0 依赖</span>
+  </header>
+
+  <section class="panel pomo" aria-label="番茄钟">
+    <div class="pomo-tabs" role="tablist">
+      <button type="button" class="active" data-mode="focus">专注 25:00</button>
+      <button type="button" data-mode="short">短休息 05:00</button>
+      <button type="button" data-mode="long">长休息 15:00</button>
+    </div>
+
+    <div class="ring-wrap">
+      <svg viewBox="0 0 260 260" aria-hidden="true">
+        <defs>
+          <linearGradient id="grad" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#6c8cff"/>
+            <stop offset="100%" stop-color="#3ddc97"/>
+          </linearGradient>
+        </defs>
+        <circle class="ring-track" cx="130" cy="130" r="112"/>
+        <circle id="ring" class="ring-bar" cx="130" cy="130" r="112"/>
+      </svg>
+      <div class="ring-time">
+        <div id="time">25:00</div>
+        <div id="state">准备开始</div>
+      </div>
+    </div>
+
+    <div class="pomo-controls">
+      <button type="button" id="start" class="btn btn-primary">开始</button>
+      <button type="button" id="reset" class="btn">重置</button>
+      <button type="button" id="skip" class="btn">跳过</button>
+    </div>
+
+    <div class="pomo-stats">
+      <div><b id="sessions">0</b><span>今日番茄</span></div>
+      <div><b id="minutes">0</b><span>专注分钟</span></div>
+      <div><b id="total">0</b><span>累计番茄</span></div>
+    </div>
+
+    <div class="cycle" id="cycle">
+      <i></i><i></i><i></i><i></i>
+      <span id="cycleText">再完成 4 个番茄进入长休息</span>
+    </div>
+  </section>
+</main>
+
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+(() => {
+  const DURATIONS = { focus: 25 * 60, short: 5 * 60, long: 15 * 60 };
+  const LABELS = { focus: '专注', short: '短休息', long: '长休息' };
+  const RING_LENGTH = 2 * Math.PI * 112;
+
+  const timeEl = document.getElementById('time');
+  const stateEl = document.getElementById('state');
+  const ringEl = document.getElementById('ring');
+  const startBtn = document.getElementById('start');
+  const resetBtn = document.getElementById('reset');
+  const skipBtn = document.getElementById('skip');
+  const sessionsEl = document.getElementById('sessions');
+  const minutesEl = document.getElementById('minutes');
+  const totalEl = document.getElementById('total');
+  const cycleEl = document.getElementById('cycle');
+  const cycleText = document.getElementById('cycleText');
+  const toastEl = document.getElementById('toast');
+  const tabs = [...document.querySelectorAll('.pomo-tabs button')];
+
+  let mode = 'focus';
+  let remaining = DURATIONS.focus;
+  let running = false;
+  let endAt = 0;
+  let timer = null;
+  let sessions = 0;
+  let minutes = 0;
+  let total = 0;
+  let toastTimer = null;
+
+  const todayKey = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+  };
+
+  function loadStats() {
+    try {
+      const saved = JSON.parse(localStorage.getItem('pomodoro.v1') || '{}');
+      total = Number(saved.total) || 0;
+      if (saved.date === todayKey()) {
+        sessions = Number(saved.sessions) || 0;
+        minutes = Number(saved.minutes) || 0;
+      }
+    } catch (e) { /* ignore broken storage */ }
+  }
+
+  function saveStats() {
+    try {
+      localStorage.setItem('pomodoro.v1', JSON.stringify({
+        date: todayKey(), sessions, minutes, total
+      }));
+    } catch (e) { /* ignore */ }
+  }
+
+  function fmt(sec) {
+    const s = Math.max(0, Math.ceil(sec));
+    return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+  }
+
+  function toast(text) {
+    toastEl.textContent = text;
+    toastEl.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastEl.classList.remove('show'), 2400);
+  }
+
+  function updateStats() {
+    sessionsEl.textContent = sessions;
+    minutesEl.textContent = minutes;
+    totalEl.textContent = total;
+    const done = mode === 'long' ? 4 : sessions % 4;
+    [...cycleEl.querySelectorAll('i')].forEach((dot, i) => dot.classList.toggle('on', i < done));
+    cycleText.textContent = done >= 4
+      ? '这一轮完成了，休息一下'
+      : `再完成 ${4 - done} 个番茄进入长休息`;
+  }
+
+  function updateUI() {
+    timeEl.textContent = fmt(remaining);
+    stateEl.textContent = running ? `${LABELS[mode]}中…` : (remaining === DURATIONS[mode] ? '准备开始' : '已暂停');
+    startBtn.textContent = running ? '暂停' : (remaining === DURATIONS[mode] ? '开始' : '继续');
+    const progress = Math.min(1, Math.max(0, remaining / DURATIONS[mode]));
+    ringEl.style.strokeDashoffset = String(RING_LENGTH * (1 - progress));
+    document.title = `${fmt(remaining)} · ${LABELS[mode]} | 番茄钟`;
+    tabs.forEach((tab) => tab.classList.toggle('active', tab.dataset.mode === mode));
+    updateStats();
+  }
+
+  function stopTimer() {
+    clearInterval(timer);
+    timer = null;
+  }
+
+  function pause(showToast) {
+    if (!running) return;
+    remaining = Math.max(0, (endAt - Date.now()) / 1000);
+    running = false;
+    stopTimer();
+    updateUI();
+    if (showToast) toast('已暂停');
+  }
+
+  function setMode(next, startNow = false) {
+    stopTimer();
+    running = false;
+    mode = next;
+    remaining = DURATIONS[mode];
+    updateUI();
+    if (startNow) start();
+  }
+
+  function beep() {
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return;
+      const ctx = new Ctx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = 880;
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.18, ctx.currentTime + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.5);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.55);
+      setTimeout(() => ctx.close && ctx.close(), 900);
+    } catch (e) { /* audio is a bonus, not essential */ }
+  }
+
+  function complete() {
+    stopTimer();
+    running = false;
+    remaining = 0;
+    updateUI();
+    beep();
+
+    if (mode === 'focus') {
+      sessions += 1;
+      minutes += DURATIONS.focus / 60;
+      total += 1;
+      saveStats();
+      const next = sessions % 4 === 0 ? 'long' : 'short';
+      setMode(next);
+      toast(next === 'long' ? '完成 4 个番茄，长休息 15 分钟' : '完成一个番茄，休息 5 分钟');
+    } else {
+      setMode('focus');
+      toast('休息结束，开始下一个番茄吧');
+    }
+  }
+
+  function tick() {
+    remaining = Math.max(0, (endAt - Date.now()) / 1000);
+    if (remaining <= 0) {
+      complete();
+      return;
+    }
+    updateUI();
+  }
+
+  function start() {
+    if (running) {
+      pause(true);
+      return;
+    }
+    if (remaining <= 0) remaining = DURATIONS[mode];
+    running = true;
+    endAt = Date.now() + remaining * 1000;
+    stopTimer();
+    timer = setInterval(tick, 200);
+    updateUI();
+  }
+
+  function reset() {
+    stopTimer();
+    running = false;
+    remaining = DURATIONS[mode];
+    updateUI();
+    toast('已重置');
+  }
+
+  function skip() {
+    stopTimer();
+    running = false;
+    const next = mode === 'focus' ? 'short' : 'focus';
+    setMode(next);
+    toast(`已跳过，进入${LABELS[next]}`);
+  }
+
+  startBtn.addEventListener('click', start);
+  resetBtn.addEventListener('click', reset);
+  skipBtn.addEventListener('click', skip);
+  tabs.forEach((tab) => tab.addEventListener('click', () => setMode(tab.dataset.mode)));
+
+  document.addEventListener('keydown', (e) => {
+    if (e.target.closest('input, textarea')) return;
+    if (e.code === 'Space') {
+      if (e.target.tagName === 'BUTTON') return;
+      e.preventDefault();
+      start();
+    } else if (e.key.toLowerCase() === 'r') {
+      reset();
+    }
+  });
+
+  loadStats();
+  updateUI();
+})();
+</script>
+</body>
+</html>

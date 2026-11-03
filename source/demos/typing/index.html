@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>打字速度测试 · 项目专区</title>
+<link rel="stylesheet" href="/demos/assets/base.css">
+<style>
+  .typing { width: min(860px, 100%); margin: 3vh auto 0; padding: 24px; }
+  .typing-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  .typing-stats { display: flex; gap: 26px; }
+  .typing-stats div { color: var(--muted); font-size: 12px; letter-spacing: .04em; }
+  .typing-stats b { display: block; color: var(--text); font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.2; }
+  .typing-time-options { display: flex; gap: 6px; padding: 4px; background: rgba(255,255,255,.04); border: 1px solid var(--line); border-radius: 12px; }
+  .typing-time-options button { border: 0; background: transparent; color: var(--muted); padding: 7px 12px; border-radius: 8px; cursor: pointer; font-size: 13px; font-family: inherit; }
+  .typing-time-options button.active { background: rgba(108,140,255,.2); color: var(--text); }
+  .typing-text { margin: 26px 0 10px; font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; font-size: clamp(17px, 2.6vw, 21px); line-height: 1.95; letter-spacing: .01em; color: #6f7c9e; word-break: break-word; cursor: text; }
+  .typing-text span { position: relative; white-space: pre-wrap; }
+  .typing-text span.ok { color: #3ddc97; }
+  .typing-text span.bad { color: #ff6b81; background: rgba(255,107,129,.12); border-radius: 3px; }
+  .typing-text span.current { color: var(--text); background: rgba(108,140,255,.28); border-radius: 3px; box-shadow: 0 0 0 2px rgba(108,140,255,.18); }
+  .typing-hint { color: #6f7c9e; font-size: 12px; margin: 0 0 18px; }
+  .typing-input { position: fixed; left: 50%; bottom: 0; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; font-size: 16px; }
+  .typing-controls { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding-top: 16px; border-top: 1px solid var(--line); }
+  .typing-result { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; color: var(--muted); font-size: 13px; margin-top: 16px; padding: 14px 16px; border: 1px solid rgba(61,220,151,.25); background: rgba(61,220,151,.06); border-radius: 14px; }
+  .typing-result[hidden] { display: none; }
+  .typing-result b { color: var(--text); font-size: 20px; margin-right: 4px; }
+  .typing-result .again { margin-left: auto; }
+  .typing-best { color: #6f7c9e; font-size: 12px; }
+  .typing-best b { color: var(--warn); }
+  @media (max-width: 560px) { .typing { padding: 18px 14px; margin-top: 10px; } .typing-stats { gap: 18px; } .typing-stats b { font-size: 22px; } .typing-result .again { margin-left: 0; } }
+</style>
+</head>
+<body>
+<main class="demo-shell">
+  <header class="demo-topbar">
+    <a class="back-link" href="/projects/">← 返回项目专区</a>
+    <span class="demo-badge">WPM · 准确率 · 本地记录</span>
+  </header>
+
+  <section class="panel typing" aria-label="打字速度测试">
+    <div class="typing-head">
+      <div class="typing-stats">
+        <div><b id="wpm">0</b>WPM</div>
+        <div><b id="accuracy">100%</b>准确率</div>
+        <div><b id="time">30</b>剩余秒数</div>
+      </div>
+      <div class="typing-time-options" role="group" aria-label="测试时长">
+        <button type="button" class="active" data-time="30">30 秒</button>
+        <button type="button" data-time="60">60 秒</button>
+      </div>
+    </div>
+
+    <div class="typing-text" id="text" tabindex="0" role="textbox" aria-label="待输入文本"></div>
+    <p class="typing-hint" id="hint">点击这段文字，然后开始输入；第一次按键时开始计时。</p>
+
+    <textarea id="input" class="typing-input" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" aria-label="打字输入框"></textarea>
+
+    <div class="typing-result" id="result" hidden>
+      <div>本次 <b id="finalWpm">0</b> WPM</div>
+      <div>准确率 <b id="finalAccuracy">0%</b></div>
+      <div>正确字符 <b id="finalChars">0</b></div>
+      <button type="button" class="btn again" id="again">再来一段</button>
+    </div>
+
+    <div class="typing-controls">
+      <span class="typing-best">个人最佳：<b id="best">0</b> WPM</span>
+      <button type="button" class="btn" id="newText">换一段</button>
+    </div>
+  </section>
+</main>
+
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+(() => {
+  const TEXTS = [
+    'The best way to learn programming is to build something small. Start with a tool you will actually use, keep it simple, and improve it one step at a time.',
+    'A good interface disappears. You do not notice the buttons; you notice that the task is done. Design is not decoration, it is the removal of friction.',
+    'Every large system began as a small experiment. The first version does not need to be perfect. It needs to be real enough to teach you what to build next.',
+    'Typing quickly is less about moving your fingers and more about trusting your hands. Look at the words, breathe, and let the rhythm come to you.',
+    'The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs. How vexingly quick daft zebras jump!',
+    'There are two hard things in computer science: cache invalidation, naming things, and off-by-one errors. The joke works because every programmer has lived it.'
+  ];
+  const BEST_KEY = 'typing.best.v1';
+
+  const textEl = document.getElementById('text');
+  const inputEl = document.getElementById('input');
+  const hintEl = document.getElementById('hint');
+  const wpmEl = document.getElementById('wpm');
+  const accuracyEl = document.getElementById('accuracy');
+  const timeEl = document.getElementById('time');
+  const resultEl = document.getElementById('result');
+  const finalWpm = document.getElementById('finalWpm');
+  const finalAccuracy = document.getElementById('finalAccuracy');
+  const finalChars = document.getElementById('finalChars');
+  const bestEl = document.getElementById('best');
+  const againBtn = document.getElementById('again');
+  const newTextBtn = document.getElementById('newText');
+  const timeButtons = [...document.querySelectorAll('.typing-time-options button')];
+
+  let target = '';
+  let spans = [];
+  let duration = 30;
+  let remaining = 30;
+  let startedAt = 0;
+  let timer = null;
+  let status = 'idle';
+  let best = Number(localStorage.getItem(BEST_KEY)) || 0;
+  let lastStats = { wpm: 0, accuracy: 0, correct: 0 };
+
+  bestEl.textContent = best;
+
+  function pickText() {
+    let next = target;
+    while (TEXTS.length > 1 && next === target) {
+      next = TEXTS[Math.floor(Math.random() * TEXTS.length)];
+    }
+    return next;
+  }
+
+  function setText(text) {
+    target = text;
+    textEl.innerHTML = '';
+    spans = [];
+    [...text].forEach((ch, i) => {
+      const span = document.createElement('span');
+      span.textContent = ch;
+      if (i === 0) span.classList.add('current');
+      textEl.append(span);
+      spans.push(span);
+    });
+  }
+
+  function reset(newText = false) {
+    if (newText) setText(pickText());
+    else if (!target) setText(pickText());
+    inputEl.value = '';
+    inputEl.disabled = false;
+    clearInterval(timer);
+    timer = null;
+    status = 'idle';
+    remaining = duration;
+    startedAt = 0;
+    lastStats = { wpm: 0, accuracy: 0, correct: 0 };
+    wpmEl.textContent = '0';
+    accuracyEl.textContent = '100%';
+    timeEl.textContent = String(duration);
+    resultEl.hidden = true;
+    hintEl.textContent = '点击这段文字，然后开始输入；第一次按键时开始计时。';
+    spans.forEach((span, i) => {
+      span.className = i === 0 ? 'current' : '';
+    });
+  }
+
+  function updateStats(typed) {
+    const elapsed = startedAt ? (performance.now() - startedAt) / 1000 : 0;
+    let correct = 0;
+    for (let i = 0; i < typed.length && i < target.length; i++) {
+      if (typed[i] === target[i]) correct += 1;
+    }
+    const minutes = elapsed / 60;
+    const wpm = minutes > 0 ? Math.round((correct / 5) / minutes) : 0;
+    const accuracy = typed.length ? Math.round((correct / typed.length) * 100) : 100;
+    lastStats = { wpm, accuracy, correct };
+    wpmEl.textContent = String(wpm);
+    accuracyEl.textContent = `${accuracy}%`;
+    return correct;
+  }
+
+  function render(typed) {
+    spans.forEach((span, i) => {
+      span.className = '';
+      if (i < typed.length) {
+        span.classList.add(typed[i] === target[i] ? 'ok' : 'bad');
+      } else if (i === typed.length) {
+        span.classList.add('current');
+      }
+    });
+  }
+
+  function startTimer() {
+    if (status !== 'idle') return;
+    status = 'running';
+    startedAt = performance.now();
+    remaining = duration;
+    clearInterval(timer);
+    timer = setInterval(() => {
+      const elapsed = (performance.now() - startedAt) / 1000;
+      remaining = Math.max(0, duration - elapsed);
+      timeEl.textContent = String(Math.ceil(remaining));
+      if (remaining <= 0) finish('时间到');
+    }, 100);
+  }
+
+  function finish(reason) {
+    if (status === 'over') return;
+    status = 'over';
+    clearInterval(timer);
+    timer = null;
+    inputEl.disabled = true;
+    const typed = inputEl.value;
+    const correct = updateStats(typed);
+    const elapsed = startedAt ? (performance.now() - startedAt) / 1000 : 0;
+    const minutes = elapsed / 60;
+    const wpm = minutes > 0 ? Math.round((correct / 5) / minutes) : 0;
+    const accuracy = typed.length ? Math.round((correct / typed.length) * 100) : 100;
+
+    finalWpm.textContent = String(wpm);
+    finalAccuracy.textContent = `${accuracy}%`;
+    finalChars.textContent = String(correct);
+    resultEl.hidden = false;
+    hintEl.textContent = reason === '完成' ? '打完了，漂亮。' : '时间到，看看成绩吧。';
+    wpmEl.textContent = String(wpm);
+    accuracyEl.textContent = `${accuracy}%`;
+    timeEl.textContent = String(Math.ceil(remaining));
+
+    if (wpm > best) {
+      best = wpm;
+      bestEl.textContent = best;
+      try { localStorage.setItem(BEST_KEY, String(best)); } catch (e) { /* ignore */ }
+    }
+  }
+
+  function onInput() {
+    if (status === 'over') return;
+    const typed = inputEl.value.replace(/\n/g, ' ');
+    if (typed !== inputEl.value) inputEl.value = typed;
+    if (!typed) {
+      render('');
+      updateStats('');
+      return;
+    }
+    if (status === 'idle') startTimer();
+    render(typed);
+    updateStats(typed);
+    if (typed.length >= target.length) finish('完成');
+  }
+
+  inputEl.addEventListener('input', onInput);
+  inputEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') e.preventDefault();
+  });
+
+  textEl.addEventListener('click', () => inputEl.focus());
+  inputEl.addEventListener('blur', () => {
+    if (status === 'running') hintEl.textContent = '输入框失去焦点了，点一下文字继续。';
+  });
+
+  timeButtons.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      duration = Number(btn.dataset.time);
+      timeButtons.forEach((b) => b.classList.toggle('active', b === btn));
+      reset(false);
+    });
+  });
+
+  againBtn.addEventListener('click', () => reset(true));
+  newTextBtn.addEventListener('click', () => reset(true));
+
+  document.addEventListener('keydown', (e) => {
+    if (e.target === inputEl) return;
+    if (e.key.length === 1 || e.key === 'Backspace') {
+      if (document.activeElement !== inputEl) inputEl.focus();
+    }
+  });
+
+  setText(pickText());
+  reset(false);
+})();
+</script>
+</body>
+</html>
